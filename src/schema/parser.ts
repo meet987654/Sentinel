@@ -95,7 +95,7 @@ function mapSchemaNode(schema: OpenAPIV3.SchemaObject): SchemaNode {
     }
   }
 
-  if (schema.items) {
+  if ('items' in schema && schema.items) {
     node.items = mapSchemaNode(schema.items as OpenAPIV3.SchemaObject);
   }
 
