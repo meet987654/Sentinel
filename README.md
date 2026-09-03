@@ -1,26 +1,26 @@
-# 🛡️ Sentinel
+# Sentinel
 
-**Sentinel** is a GitHub-native bot that automatically detects breaking API contract changes and flags the specific TypeScript code in your repository that will be affected by those changes.
+Sentinel is a GitHub-native bot that automatically detects breaking API contract changes and flags the specific TypeScript code in your repository that will be affected by those changes.
 
-Built with **Fastify**, **ts-morph**, and **Groq (LLMs)**, Sentinel ensures your frontend and consumer services never break due to unannounced backend API changes.
+Built with Fastify, ts-morph, and Groq (LLMs), Sentinel ensures your frontend and consumer services never break due to unannounced backend API changes.
 
 ---
 
-## ✨ Features
+## Features
 
 - **Automated Schema Diffing:** Automatically detects when `openapi.yaml` changes in a Pull Request and diffs the `base` and `head` branches to find breaking changes (e.g., removed fields, changed types).
 - **AST Code Analysis:** Uses Abstract Syntax Trees (`ts-morph`) to scan your TypeScript source code and find exactly which files and lines of code are consuming the broken endpoints.
 - **AI-Powered Summaries:** Uses Groq's high-speed LLMs (Qwen/Llama) to generate human-readable summaries of the breaking changes and suggest mitigation strategies.
 - **GitHub Native:** Seamlessly integrates into your workflow by posting detailed markdown comments on Pull Requests and blocking merges via failing Check Runs.
 
-## 🚀 How it Works
+## Architecture and Workflow
 
 1. **Webhook Trigger:** When a Pull Request is opened or updated, GitHub sends a webhook payload to the Sentinel server.
 2. **Analysis Pipeline:** Sentinel fetches the OpenAPI schema from both branches, diffs them, and analyzes the TypeScript files for consumers of the changed endpoints.
 3. **LLM Generation:** The raw breaking changes and AST findings are sent to Groq for natural language summarization.
-4. **Report:** Sentinel posts the final report as a PR comment and updates the Check Run status to prevent breaking changes from being merged.
+4. **Report Generation:** Sentinel posts the final report as a PR comment and updates the Check Run status to prevent breaking changes from being merged.
 
-## 🛠️ Setup and Installation
+## Setup and Installation
 
 ### Prerequisites
 - Node.js (v20+)
@@ -31,7 +31,7 @@ Built with **Fastify**, **ts-morph**, and **Groq (LLMs)**, Sentinel ensures your
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/Sentinel.git
+   git clone https://github.com/meet987654/Sentinel.git
    cd Sentinel
    ```
 
@@ -54,12 +54,12 @@ Built with **Fastify**, **ts-morph**, and **Groq (LLMs)**, Sentinel ensures your
    npm run dev
    ```
 
-5. Use a tunnel like `localtunnel` or `pinggy` to forward webhooks to `localhost:3000`.
+5. Use a tunnel like `localtunnel` to forward webhooks to `localhost:3000`.
 
 ### Cloud Deployment
-Sentinel includes a `Dockerfile` and is fully ready to be deployed to platforms like **Render**, **Railway**, or **AWS**. Simply connect your repository, add your environment variables, and map the public URL to your GitHub App's webhook settings.
+Sentinel includes a `Dockerfile` and is fully ready to be deployed to platforms like Render, Railway, or AWS. Simply connect your repository, add your environment variables, and map the public URL to your GitHub App's webhook settings.
 
-## 🏗️ Built With
+## Built With
 
 - **[Fastify](https://fastify.dev/)** - High performance Node.js web framework
 - **[Octokit](https://github.com/octokit)** - Official GitHub API client
@@ -67,5 +67,23 @@ Sentinel includes a `Dockerfile` and is fully ready to be deployed to platforms 
 - **[Groq SDK](https://console.groq.com/)** - Ultra-fast LLM inference
 - **[swagger-parser](https://apitools.dev/swagger-parser/)** - OpenAPI schema parsing
 
-## 📄 License
+## Contributing
+
+We welcome contributions from the open-source community! Whether it is a bug report, feature request, or a code contribution, your input is highly valued.
+
+### How to Contribute
+
+1. **Report Issues:** If you encounter a bug or have a suggestion, please open an issue in the [Issue Tracker](https://github.com/meet987654/Sentinel/issues). Be sure to include a clear description and steps to reproduce any bugs.
+2. **Request Features:** Have an idea to make Sentinel better? Open an issue and describe the feature, its use case, and how it would benefit the project.
+3. **Submit Pull Requests:** 
+   - Fork the repository.
+   - Create a new branch for your feature or bug fix (`git checkout -b feature/your-feature-name`).
+   - Make your changes and write tests if applicable.
+   - Commit your changes (`git commit -m "Add some feature"`).
+   - Push to the branch (`git push origin feature/your-feature-name`).
+   - Open a Pull Request against the `main` branch.
+
+Please ensure your code follows the existing style and passes all tests before submitting.
+
+## License
 MIT License
