@@ -16,6 +16,8 @@ Built with Fastify, ts-morph, and Groq (LLMs), Sentinel ensures your frontend an
 ## In Action
 
 ![Sentinel blocking a PR with an AST analysis summary](assets/screenshot.png)
+<br/>
+*👉 [View the live Pull Request demonstrating Sentinel in action here!](https://github.com/meet987654/StudentConnect/pull/1)*
 
 ## Architecture and Workflow
 
