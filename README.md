@@ -15,6 +15,25 @@ Built with Fastify, ts-morph, and Groq (LLMs), Sentinel ensures your frontend an
 
 ## Architecture and Workflow
 
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GitHub as GitHub PR
+    participant Sentinel as Sentinel App (Render)
+    participant Groq as Groq LLM
+
+    Dev->>GitHub: Modifies openapi.yaml
+    GitHub->>Sentinel: Webhook (pull_request.opened)
+    Sentinel->>GitHub: Fetch base & head schemas
+    Sentinel->>Sentinel: Diff schemas for breaking changes
+    Sentinel->>GitHub: Fetch TypeScript source files
+    Sentinel->>Sentinel: AST Analysis (ts-morph)
+    Sentinel->>Groq: Request plain-English summary
+    Groq-->>Sentinel: Return summary
+    Sentinel->>GitHub: Post PR Comment
+    Sentinel->>GitHub: Fail Check Run (Block Merge)
+```
+
 1. **Webhook Trigger:** When a Pull Request is opened or updated, GitHub sends a webhook payload to the Sentinel server.
 2. **Analysis Pipeline:** Sentinel fetches the OpenAPI schema from both branches, diffs them, and analyzes the TypeScript files for consumers of the changed endpoints.
 3. **LLM Generation:** The raw breaking changes and AST findings are sent to Groq for natural language summarization.
