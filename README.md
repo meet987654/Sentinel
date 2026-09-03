@@ -13,6 +13,10 @@ Built with Fastify, ts-morph, and Groq (LLMs), Sentinel ensures your frontend an
 - **AI-Powered Summaries:** Uses Groq's high-speed LLMs (Qwen/Llama) to generate human-readable summaries of the breaking changes and suggest mitigation strategies.
 - **GitHub Native:** Seamlessly integrates into your workflow by posting detailed markdown comments on Pull Requests and blocking merges via failing Check Runs.
 
+## In Action
+
+![Sentinel blocking a PR with an AST analysis summary](assets/screenshot.png)
+
 ## Architecture and Workflow
 
 ```mermaid
