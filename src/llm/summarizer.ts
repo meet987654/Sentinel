@@ -34,7 +34,7 @@ Do not use markdown lists. Do not say "Here is the summary". Just write the text
   try {
     const chatCompletion = await groq.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
-      model: 'llama3-8b-8192', // or any preferred groq model
+      model: 'qwen/qwen3.8-27b',
       temperature: 0.2,
     });
 

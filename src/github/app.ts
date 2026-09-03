@@ -11,9 +11,13 @@ const APP_ID = process.env.APP_ID || '';
 const PRIVATE_KEY = process.env.PRIVATE_KEY ? process.env.PRIVATE_KEY.replace(/\\n/g, '\n') : '';
 const SCHEMA_FILE_PATH = process.env.SCHEMA_FILE_PATH || 'openapi.yaml';
 
+if (!APP_ID || isNaN(Number(APP_ID))) {
+  console.warn('⚠️ WARNING: APP_ID is missing or not a number in .env. Using a dummy value (1) so the server can start, but API calls will fail.');
+}
+
 const app = new App({
-  appId: APP_ID,
-  privateKey: PRIVATE_KEY,
+  appId: !APP_ID || isNaN(Number(APP_ID)) ? 1 : Number(APP_ID),
+  privateKey: PRIVATE_KEY || 'dummy_key',
 });
 
 export async function handlePullRequestEvent(payload: any) {
