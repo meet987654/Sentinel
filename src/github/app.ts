@@ -6,6 +6,7 @@ import { generateSummary } from '../llm/summarizer.js';
 import { createCheckRun, createOrUpdateComment } from './reporter.js';
 import { ChangeReport, ConsumerFinding } from '../types.js';
 import { Project } from 'ts-morph';
+import yaml from 'js-yaml';
 
 const APP_ID = process.env.APP_ID || '';
 const PRIVATE_KEY = process.env.PRIVATE_KEY ? process.env.PRIVATE_KEY.replace(/\\n/g, '\n') : '';
@@ -31,22 +32,37 @@ export async function handlePullRequestEvent(payload: any) {
   console.log(`Processing PR #${prNumber} on ${owner}/${repo}`);
   const octokit = await app.getInstallationOctokit(installationId);
 
-  // 1. Check if the schema file changed in this PR
+  // 1. Check for per-repo configuration
+  let schemaFilePath = SCHEMA_FILE_PATH;
+  try {
+    const configContent = await getFileContent(octokit, owner, repo, '.sentinel.yml', headRef);
+    if (configContent) {
+      const config = yaml.load(configContent) as any;
+      if (config && config.schemaPath) {
+        schemaFilePath = config.schemaPath;
+        console.log(`Loaded custom schema path from .sentinel.yml: ${schemaFilePath}`);
+      }
+    }
+  } catch (error) {
+    console.log('Failed to parse .sentinel.yml or no custom schema path found, using default.');
+  }
+
+  // 2. Check if the schema file changed in this PR
   const files = await octokit.rest.pulls.listFiles({
     owner,
     repo,
     pull_number: prNumber,
   });
 
-  const schemaFileChanged = files.data.some((f: any) => f.filename === SCHEMA_FILE_PATH);
+  const schemaFileChanged = files.data.some((f: any) => f.filename === schemaFilePath);
   if (!schemaFileChanged) {
-    console.log(`Schema file (${SCHEMA_FILE_PATH}) did not change. Exiting early.`);
+    console.log(`Schema file (${schemaFilePath}) did not change. Exiting early.`);
     return;
   }
 
-  // 2. Fetch Base and PR versions of the schema
-  const baseContent = await getFileContent(octokit, owner, repo, SCHEMA_FILE_PATH, baseRef);
-  const prContent = await getFileContent(octokit, owner, repo, SCHEMA_FILE_PATH, headRef);
+  // 3. Fetch Base and PR versions of the schema
+  const baseContent = await getFileContent(octokit, owner, repo, schemaFilePath, baseRef);
+  const prContent = await getFileContent(octokit, owner, repo, schemaFilePath, headRef);
 
   if (!baseContent || !prContent) {
     console.log('Could not fetch schema content for base or PR branch.');
