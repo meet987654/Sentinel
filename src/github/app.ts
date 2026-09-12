@@ -54,7 +54,16 @@ export async function handlePullRequestEvent(payload: any) {
     pull_number: prNumber,
   });
 
-  const schemaFileChanged = files.data.some((f: any) => f.filename === schemaFilePath);
+  let schemaFileChanged = files.data.some((f: any) => f.filename === schemaFilePath);
+  if (!schemaFileChanged && schemaFilePath === 'openapi.yaml') {
+    const alternativeSchema = files.data.find((f: any) => f.filename === 'openapi.json' || f.filename === 'openapi.yml');
+    if (alternativeSchema) {
+      schemaFilePath = alternativeSchema.filename;
+      schemaFileChanged = true;
+      console.log(`Auto-detected schema file from PR: ${schemaFilePath}`);
+    }
+  }
+
   if (!schemaFileChanged) {
     console.log(`Schema file (${schemaFilePath}) did not change. Exiting early.`);
     return;
@@ -70,8 +79,8 @@ export async function handlePullRequestEvent(payload: any) {
   }
 
   // 3. Parse and Diff
-  const baseSchema = await parseOpenApi(baseContent);
-  const prSchema = await parseOpenApi(prContent);
+  const baseSchema = await parseOpenApi(baseContent, schemaFilePath);
+  const prSchema = await parseOpenApi(prContent, schemaFilePath);
   const changes = diffSchemas(baseSchema, prSchema);
 
   let findings: ConsumerFinding[] = [];

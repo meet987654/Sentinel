@@ -3,13 +3,21 @@ import { ApiSchema, Endpoint, Parameter, SchemaNode } from '../types.js';
 import { OpenAPIV3 } from 'openapi-types';
 import yaml from 'js-yaml';
 
-export async function parseOpenApi(content: string): Promise<ApiSchema> {
+export async function parseOpenApi(content: string, filePath?: string): Promise<ApiSchema> {
   // Parse yaml/json string into an object
   let rawObj: any;
-  try {
-    rawObj = yaml.load(content);
-  } catch (err) {
+  const ext = filePath?.toLowerCase();
+
+  if (ext?.endsWith('.json')) {
     rawObj = JSON.parse(content);
+  } else if (ext?.endsWith('.yaml') || ext?.endsWith('.yml')) {
+    rawObj = yaml.load(content);
+  } else {
+    try {
+      rawObj = yaml.load(content);
+    } catch (err) {
+      rawObj = JSON.parse(content);
+    }
   }
 
   // Dereference all $ref pointers so we have a flat, fully resolved object
