@@ -57,6 +57,18 @@ export async function handlePullRequestEvent(payload: any) {
   const schemaFileChanged = files.data.some((f: any) => f.filename === schemaFilePath);
   if (!schemaFileChanged) {
     console.log(`Schema file (${schemaFilePath}) did not change. Exiting early.`);
+    await octokit.rest.checks.create({
+      owner,
+      repo,
+      name: 'Sentinel API Check',
+      head_sha: headRef,
+      status: 'completed',
+      conclusion: 'success',
+      output: {
+        title: 'No Schema Changes',
+        summary: 'No changes were detected in the OpenAPI schema.'
+      }
+    });
     return;
   }
 
@@ -66,6 +78,18 @@ export async function handlePullRequestEvent(payload: any) {
 
   if (!baseContent || !prContent) {
     console.log('Could not fetch schema content for base or PR branch.');
+    await octokit.rest.checks.create({
+      owner,
+      repo,
+      name: 'Sentinel API Check',
+      head_sha: headRef,
+      status: 'completed',
+      conclusion: 'success',
+      output: {
+        title: 'Schema Content Unavailable',
+        summary: 'Could not fetch schema content for base or PR branch. Skipping check.'
+      }
+    });
     return;
   }
 
