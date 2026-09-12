@@ -188,4 +188,56 @@ components:
     const result = await parseOpenApi(emptyPathsJson, 'openapi.json');
     expect(result.endpoints.size).toBe(0);
   });
+
+  it('should handle circular $ref schemas without stack overflow', async () => {
+    const circularJson = JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "Circular API", version: "1.0.0" },
+      paths: {
+        "/tree": {
+          get: {
+            responses: {
+              "200": {
+                description: "Node",
+                content: {
+                  "application/json": {
+                    schema: {
+                      $ref: "#/components/schemas/TreeNode"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      components: {
+        schemas: {
+          TreeNode: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+              child: { $ref: "#/components/schemas/TreeNode" }
+            }
+          }
+        }
+      }
+    });
+
+    const result = await parseOpenApi(circularJson, 'openapi.json');
+    expect(result.endpoints.has('GET /tree')).toBe(true);
+    const ep = result.endpoints.get('GET /tree')!;
+    const res200 = ep.responses.get(200);
+    expect(res200).toBeDefined();
+    expect(res200?.properties?.get('value')?.type).toBe('string');
+    expect(res200?.properties?.get('child')?.type).toBe('object');
+  });
+
+  it('should return empty endpoints for empty or whitespace content', async () => {
+    const emptyResult = await parseOpenApi('', 'openapi.json');
+    expect(emptyResult.endpoints.size).toBe(0);
+
+    const whitespaceResult = await parseOpenApi('   \n  ', 'openapi.yaml');
+    expect(whitespaceResult.endpoints.size).toBe(0);
+  });
 });
