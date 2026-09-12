@@ -3,19 +3,34 @@ import { ApiSchema, Endpoint, Parameter, SchemaNode } from '../types.js';
 import { OpenAPIV3 } from 'openapi-types';
 import yaml from 'js-yaml';
 
-export async function parseOpenApi(content: string): Promise<ApiSchema> {
+export async function parseOpenApi(content: string, filePath?: string): Promise<ApiSchema> {
+  const endpoints = new Map<string, Endpoint>();
+  if (!content || !content.trim()) {
+    return { endpoints };
+  }
+
   // Parse yaml/json string into an object
   let rawObj: any;
-  try {
-    rawObj = yaml.load(content);
-  } catch (err) {
+  const ext = filePath?.toLowerCase();
+
+  if (ext?.endsWith('.json')) {
     rawObj = JSON.parse(content);
+  } else if (ext?.endsWith('.yaml') || ext?.endsWith('.yml')) {
+    rawObj = yaml.load(content);
+  } else {
+    try {
+      rawObj = yaml.load(content);
+    } catch (err) {
+      rawObj = JSON.parse(content);
+    }
+  }
+
+  if (!rawObj || typeof rawObj !== 'object') {
+    return { endpoints };
   }
 
   // Dereference all $ref pointers so we have a flat, fully resolved object
   const api = (await SwaggerParser.dereference(rawObj)) as OpenAPIV3.Document;
-
-  const endpoints = new Map<string, Endpoint>();
 
   if (!api.paths) return { endpoints };
 
@@ -82,22 +97,28 @@ export async function parseOpenApi(content: string): Promise<ApiSchema> {
   return { endpoints };
 }
 
-function mapSchemaNode(schema: OpenAPIV3.SchemaObject): SchemaNode {
+function mapSchemaNode(schema: OpenAPIV3.SchemaObject, visited = new Set<OpenAPIV3.SchemaObject>()): SchemaNode {
   const node: SchemaNode = {
     type: Array.isArray(schema.type) ? schema.type[0] : (schema.type || 'unknown'),
     required: new Set<string>(schema.required || []),
   };
 
+  if (visited.has(schema)) {
+    return node;
+  }
+  visited.add(schema);
+
   if (schema.properties) {
     node.properties = new Map<string, SchemaNode>();
     for (const [key, propSchema] of Object.entries(schema.properties)) {
-      node.properties.set(key, mapSchemaNode(propSchema as OpenAPIV3.SchemaObject));
+      node.properties.set(key, mapSchemaNode(propSchema as OpenAPIV3.SchemaObject, visited));
     }
   }
 
   if ('items' in schema && schema.items) {
-    node.items = mapSchemaNode(schema.items as OpenAPIV3.SchemaObject);
+    node.items = mapSchemaNode(schema.items as OpenAPIV3.SchemaObject, visited);
   }
 
+  visited.delete(schema);
   return node;
 }
