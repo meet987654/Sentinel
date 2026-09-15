@@ -103,8 +103,30 @@ export async function handlePullRequestEvent(payload: any) {
   }
 
   // 3. Parse and Diff
-  const baseSchema = await parseOpenApi(baseContent, schemaFilePath);
-  const prSchema = await parseOpenApi(prContent, schemaFilePath);
+  const baseResolver = {
+    order: 1,
+    canRead: /^github:\/\//i,
+    read: async (file: any) => {
+      const path = file.url.replace(/^github:\/\/internal\//i, '');
+      const content = await getFileContent(octokit, owner, repo, path, baseRef);
+      if (content === null) throw new Error(`File not found: ${path} at ${baseRef}`);
+      return content;
+    }
+  };
+
+  const headResolver = {
+    order: 1,
+    canRead: /^github:\/\//i,
+    read: async (file: any) => {
+      const path = file.url.replace(/^github:\/\/internal\//i, '');
+      const content = await getFileContent(octokit, owner, repo, path, headRef);
+      if (content === null) throw new Error(`File not found: ${path} at ${headRef}`);
+      return content;
+    }
+  };
+
+  const baseSchema = await parseOpenApi(baseContent, schemaFilePath, baseResolver);
+  const prSchema = await parseOpenApi(prContent, schemaFilePath, headResolver);
   const changes = diffSchemas(baseSchema, prSchema);
 
   let findings: ConsumerFinding[] = [];

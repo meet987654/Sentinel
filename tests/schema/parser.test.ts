@@ -240,4 +240,64 @@ components:
     const whitespaceResult = await parseOpenApi('   \n  ', 'openapi.yaml');
     expect(whitespaceResult.endpoints.size).toBe(0);
   });
+
+  it('should resolve external $ref using a custom github resolver', async () => {
+    const rootSchema = JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "External Ref API", version: "1.0.0" },
+      paths: {
+        "/users": {
+          get: {
+            responses: {
+              "200": {
+                description: "Success",
+                content: {
+                  "application/json": {
+                    schema: {
+                      $ref: "components/user.yaml"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const mockExternalFile = `
+type: object
+required:
+  - id
+properties:
+  id:
+    type: string
+  name:
+    type: string
+`;
+
+    const mockResolver = {
+      order: 1,
+      canRead: /^github:\/\//i,
+      read: async (file: any) => {
+        const path = file.url.replace(/^github:\/\/internal\//i, '');
+        if (path === 'components/user.yaml') {
+          return mockExternalFile;
+        }
+        throw new Error(`Mock file not found: ${path}`);
+      }
+    };
+
+    const result = await parseOpenApi(rootSchema, 'openapi.json', mockResolver);
+    expect(result.endpoints.has('GET /users')).toBe(true);
+    
+    const ep = result.endpoints.get('GET /users')!;
+    const res200 = ep.responses.get(200);
+    expect(res200).toBeDefined();
+    
+    // Check if the external properties were correctly resolved and parsed
+    expect(res200?.properties?.get('id')?.type).toBe('string');
+    expect(res200?.properties?.get('name')?.type).toBe('string');
+    expect(res200?.required.has('id')).toBe(true);
+  });
 });

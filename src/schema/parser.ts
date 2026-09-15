@@ -3,7 +3,7 @@ import { ApiSchema, Endpoint, Parameter, SchemaNode } from '../types.js';
 import { OpenAPIV3 } from 'openapi-types';
 import yaml from 'js-yaml';
 
-export async function parseOpenApi(content: string, filePath?: string): Promise<ApiSchema> {
+export async function parseOpenApi(content: string, filePath?: string, resolver?: any): Promise<ApiSchema> {
   const endpoints = new Map<string, Endpoint>();
   if (!content || !content.trim()) {
     return { endpoints };
@@ -30,7 +30,19 @@ export async function parseOpenApi(content: string, filePath?: string): Promise<
   }
 
   // Dereference all $ref pointers so we have a flat, fully resolved object
-  const api = (await SwaggerParser.dereference(rawObj)) as OpenAPIV3.Document;
+  let api;
+  if (resolver && filePath) {
+    const dummyUrl = `github://internal/${filePath}`;
+    api = (await SwaggerParser.dereference(dummyUrl, rawObj, {
+      resolve: {
+        github: resolver,
+        file: false,
+        http: false,
+      }
+    })) as OpenAPIV3.Document;
+  } else {
+    api = (await SwaggerParser.dereference(rawObj)) as OpenAPIV3.Document;
+  }
 
   if (!api.paths) return { endpoints };
 
