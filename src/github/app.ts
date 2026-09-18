@@ -169,7 +169,7 @@ export async function handlePullRequestEvent(payload: any) {
 
   // 6. Post Comment and Check Run
   await createOrUpdateComment(octokit, owner, repo, prNumber, report);
-  await createCheckRun(octokit, owner, repo, headRef, report);
+  await createCheckRun(octokit, owner, repo, headRef, report, schemaFilePath, prContent);
   console.log(`Finished processing PR #${prNumber}`);
 }
 

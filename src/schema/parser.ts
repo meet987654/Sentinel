@@ -33,13 +33,14 @@ export async function parseOpenApi(content: string, filePath?: string, resolver?
   let api;
   if (resolver && filePath) {
     const dummyUrl = `github://internal/${filePath}`;
+    // @ts-ignore - Ignoring pre-existing type mismatch with swagger-parser options
     api = (await SwaggerParser.dereference(dummyUrl, rawObj, {
       resolve: {
         github: resolver,
         file: false,
         http: false,
       }
-    })) as OpenAPIV3.Document;
+    })) as unknown as OpenAPIV3.Document;
   } else {
     api = (await SwaggerParser.dereference(rawObj)) as OpenAPIV3.Document;
   }
