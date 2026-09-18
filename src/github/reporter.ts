@@ -42,10 +42,27 @@ export async function createCheckRun(
   owner: string,
   repo: string,
   headSha: string,
-  report: ChangeReport
+  report: ChangeReport,
+  schemaFilePath: string = 'openapi.yaml',
+  prContent: string = ''
 ) {
   const breakingCount = report.changes.filter(c => c.severity === 'breaking').length;
   
+  const annotations: any[] = [];
+  for (const change of report.changes) {
+    const line = findLineNumber(prContent, change.path, change.type);
+    annotations.push({
+      path: schemaFilePath,
+      start_line: line,
+      end_line: line,
+      annotation_level: change.severity === 'breaking' ? 'failure' : 'warning',
+      message: `${change.severity.toUpperCase()} CHANGE: ${change.type} - ${change.path.split('.').pop()}`
+    });
+  }
+
+  // GitHub allows max 50 annotations per request.
+  const batch = annotations.slice(0, 50);
+
   await octokit.rest.checks.create({
     owner,
     repo,
@@ -56,8 +73,48 @@ export async function createCheckRun(
     output: {
       title: breakingCount > 0 ? `${breakingCount} breaking changes found` : 'API Contract is safe',
       summary: report.summary || 'Completed schema diff analysis.',
+      annotations: batch.length > 0 ? batch : undefined
     }
   });
+}
+
+function findLineNumber(content: string, path: string, changeType: string): number {
+  if (!content) return 1;
+  const lines = content.split('\n');
+  const parts = path.split('.');
+  const endpoint = parts[0]; // e.g. "GET /users/{id}"
+  const method = endpoint.split(' ')[0]?.toLowerCase();
+  const route = endpoint.split(' ')[1];
+
+  let routeLine = -1;
+  let methodLine = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (route && (line.includes(`'${route}'`) || line.includes(`"${route}"`) || line.includes(`${route}:`))) {
+      routeLine = i + 1;
+    } else if (routeLine !== -1 && method && line.trim().startsWith(`${method}:`)) {
+      methodLine = i + 1;
+      break;
+    }
+  }
+
+  const startSearchLine = methodLine !== -1 ? methodLine : (routeLine !== -1 ? routeLine : 1);
+
+  if (changeType === 'FIELD_REMOVED' || changeType === 'ENDPOINT_REMOVED') {
+    // Cannot find the specific field since it was removed in the PR branch, fallback to the method or route line
+    return startSearchLine;
+  }
+
+  // For other changes, search for the specific property name
+  const targetProp = parts[parts.length - 1];
+  for (let i = startSearchLine - 1; i < lines.length; i++) {
+    if (lines[i].includes(`${targetProp}:`)) {
+      return i + 1;
+    }
+  }
+
+  return startSearchLine;
 }
 
 function formatComment(report: ChangeReport): string {
