@@ -33,7 +33,7 @@ export interface BreakingChange {
 }
 
 export interface ConsumerFinding {
-  confidence: 'high' | 'medium';
+  confidence: 'confirmed' | 'high' | 'medium';
   filePath: string;
   lineNumber: number;
   snippet: string;

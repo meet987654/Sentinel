@@ -1,4 +1,4 @@
-import { Project, SyntaxKind } from 'ts-morph';
+import { Project, SyntaxKind, PropertyAccessExpression } from 'ts-morph';
 import { BreakingChange, ConsumerFinding } from '../types.js';
 
 export function analyzeConsumers(
@@ -45,12 +45,15 @@ export function analyzeConsumersFromProject(
       const propName = access.getName();
 
       if (propertyNamesToFind.has(propName)) {
+        const schemaPath = propertyNamesToFind.get(propName) || '';
         const line = sourceFile.getLineAndColumnAtPos(access.getStart()).line;
         const lineText = sourceFile.getFullText().split('\n')[line - 1].trim();
         const relativePath = sourceFile.getFilePath().replace(/^[\/\\]/, '');
 
+        const confidence = resolveSymbolConfidence(access, schemaPath);
+
         findings.push({
-          confidence: 'medium',
+          confidence,
           filePath: relativePath,
           lineNumber: line,
           snippet: lineText,
@@ -61,4 +64,60 @@ export function analyzeConsumersFromProject(
   }
 
   return findings;
+}
+
+function resolveSymbolConfidence(
+  access: PropertyAccessExpression,
+  schemaPath: string
+): 'confirmed' | 'high' | 'medium' {
+  try {
+    const expr = access.getExpression();
+    const exprType = expr.getType();
+
+    // Untyped expressions (any / unknown) cannot be symbol-confirmed
+    if (exprType.isAny() || exprType.isUnknown()) {
+      return 'medium';
+    }
+
+    const symbol = exprType.getSymbol() || exprType.getAliasSymbol();
+    if (!symbol) {
+      return 'medium';
+    }
+
+    const symbolName = symbol.getName().toLowerCase();
+    
+    // Extract schema path keywords (e.g. "GET /users.response.200.email" -> ["users", "email"])
+    const pathKeywords = schemaPath
+      .toLowerCase()
+      .split(/[\/\.\s_]+/)
+      .filter(k => k && k !== 'response' && k !== 'get' && k !== 'post' && k !== 'put' && k !== 'delete' && k !== '200');
+
+    // Check if the symbol name matches keywords from the OpenAPI schema path
+    const isSymbolMatch = pathKeywords.some(keyword => {
+      if (keyword.length <= 2) return false;
+      const singular = keyword.endsWith('s') ? keyword.slice(0, -1) : keyword;
+      return symbolName.includes(keyword) || symbolName.includes(singular);
+    });
+
+    if (isSymbolMatch) {
+      return 'confirmed';
+    }
+
+    // Check if symbol belongs to a declared Interface, TypeAlias, or Class in the project
+    const declarations = symbol.getDeclarations();
+    const hasInterfaceOrTypeDecl = declarations.some(
+      decl =>
+        decl.getKind() === SyntaxKind.InterfaceDeclaration ||
+        decl.getKind() === SyntaxKind.TypeAliasDeclaration ||
+        decl.getKind() === SyntaxKind.ClassDeclaration
+    );
+
+    if (hasInterfaceOrTypeDecl) {
+      return 'confirmed';
+    }
+
+    return 'high';
+  } catch {
+    return 'medium';
+  }
 }

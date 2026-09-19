@@ -161,13 +161,35 @@ function formatComment(report: ChangeReport): string {
 
   markdown += `### 🔍 Likely Affected Code\n\n`;
   if (report.findings.length === 0) {
-    markdown += `*No medium-confidence usages found in this repository.*\n\n`;
+    markdown += `*No consumer usages found in this repository.*\n\n`;
   } else {
-    markdown += `**MEDIUM confidence**\n`;
-    for (const f of report.findings) {
-      markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+    const confirmed = report.findings.filter(f => f.confidence === 'confirmed');
+    const high = report.findings.filter(f => f.confidence === 'high');
+    const medium = report.findings.filter(f => f.confidence === 'medium');
+
+    if (confirmed.length > 0) {
+      markdown += `**CONFIRMED Source Usages (Statically Resolved)**\n`;
+      for (const f of confirmed) {
+        markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+      }
+      markdown += `\n`;
     }
-    markdown += `\n`;
+
+    if (high.length > 0) {
+      markdown += `**HIGH Confidence**\n`;
+      for (const f of high) {
+        markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+      }
+      markdown += `\n`;
+    }
+
+    if (medium.length > 0) {
+      markdown += `**MEDIUM Confidence (Name Matched)**\n`;
+      for (const f of medium) {
+        markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+      }
+      markdown += `\n`;
+    }
   }
 
   if (report.summary) {
