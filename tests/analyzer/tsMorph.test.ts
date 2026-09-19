@@ -4,12 +4,12 @@ import { analyzeConsumersFromProject } from '../../src/analyzer/tsMorph.js';
 import { BreakingChange } from '../../src/types.js';
 
 describe('ts-morph Consumer Analyzer', () => {
-  it('should detect medium-confidence property accesses for removed fields', () => {
+  it('should detect medium-confidence property accesses for untyped removed fields', () => {
     const project = new Project({ useInMemoryFileSystem: true });
     
     // Create a mock source file with an expected usage
     project.createSourceFile('src/components/Profile.tsx', `
-      function Profile({ user }) {
+      function Profile({ user }: { user: any }) {
         return <div>{user.email}</div>;
       }
     `);
@@ -40,10 +40,46 @@ describe('ts-morph Consumer Analyzer', () => {
     expect(findings[0].snippet).toContain('{user.email}');
   });
 
+  it('should mark symbol-resolved property accesses as confirmed confidence', () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    project.createSourceFile('src/types/api.ts', `
+      export interface UserResponse {
+        id: string;
+        email: string;
+      }
+    `);
+
+    project.createSourceFile('src/components/UserProfile.tsx', `
+      import { UserResponse } from '../types/api';
+
+      export function UserProfile({ user }: { user: UserResponse }) {
+        return <div>{user.email}</div>;
+      }
+    `);
+
+    const breakingChanges: BreakingChange[] = [
+      {
+        type: 'FIELD_REMOVED',
+        severity: 'breaking',
+        path: 'GET /users.response.200.email',
+      }
+    ];
+
+    const findings = analyzeConsumersFromProject(project, breakingChanges);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      confidence: 'confirmed',
+      filePath: 'src/components/UserProfile.tsx',
+      property: 'email',
+    });
+  });
+
   it('should ignore array markers and status codes when extracting property names', () => {
     const project = new Project({ useInMemoryFileSystem: true });
     
-    // Mock code that uses a variable called '200' or similar (not typical but edge case)
+    // Mock code that uses a variable called '200' or similar
     project.createSourceFile('src/test.ts', `
       const obj = { '200': 'ok' };
       console.log(obj['200']);
