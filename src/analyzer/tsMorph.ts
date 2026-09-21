@@ -1,4 +1,4 @@
-import { Project, SyntaxKind, PropertyAccessExpression } from 'ts-morph';
+import { Project, SyntaxKind, PropertyAccessExpression, BindingElement } from 'ts-morph';
 import { BreakingChange, ConsumerFinding } from '../types.js';
 
 export function analyzeConsumers(
@@ -39,6 +39,10 @@ export function analyzeConsumersFromProject(
       continue;
     }
 
+    const relativePath = sourceFile.getFilePath().replace(/^[\/\\]/, '');
+    const seen = new Set<string>();
+
+    // 1. Scan PropertyAccessExpressions (e.g. user.university)
     const propertyAccesses = sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression);
 
     for (const access of propertyAccesses) {
@@ -48,17 +52,47 @@ export function analyzeConsumersFromProject(
         const schemaPath = propertyNamesToFind.get(propName) || '';
         const line = sourceFile.getLineAndColumnAtPos(access.getStart()).line;
         const lineText = sourceFile.getFullText().split('\n')[line - 1].trim();
-        const relativePath = sourceFile.getFilePath().replace(/^[\/\\]/, '');
+        const key = `${relativePath}:${line}:${propName}`;
 
-        const confidence = resolveSymbolConfidence(access, schemaPath);
+        if (!seen.has(key)) {
+          seen.add(key);
+          const confidence = resolveSymbolConfidence(access, schemaPath);
 
-        findings.push({
-          confidence,
-          filePath: relativePath,
-          lineNumber: line,
-          snippet: lineText,
-          property: propName,
-        });
+          findings.push({
+            confidence,
+            filePath: relativePath,
+            lineNumber: line,
+            snippet: lineText,
+            property: propName,
+          });
+        }
+      }
+    }
+
+    // 2. Scan BindingElements for destructuring (e.g. const { university } = user)
+    const bindingElements = sourceFile.getDescendantsOfKind(SyntaxKind.BindingElement);
+
+    for (const element of bindingElements) {
+      const propName = element.getPropertyNameNode()?.getText() || element.getName();
+
+      if (propertyNamesToFind.has(propName)) {
+        const schemaPath = propertyNamesToFind.get(propName) || '';
+        const line = sourceFile.getLineAndColumnAtPos(element.getStart()).line;
+        const lineText = sourceFile.getFullText().split('\n')[line - 1].trim();
+        const key = `${relativePath}:${line}:${propName}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          const confidence = resolveBindingElementConfidence(element, schemaPath);
+
+          findings.push({
+            confidence,
+            filePath: relativePath,
+            lineNumber: line,
+            snippet: lineText,
+            property: propName,
+          });
+        }
       }
     }
   }
@@ -74,7 +108,6 @@ function resolveSymbolConfidence(
     const expr = access.getExpression();
     const exprType = expr.getType();
 
-    // Untyped expressions (any / unknown) cannot be symbol-confirmed
     if (exprType.isAny() || exprType.isUnknown()) {
       return 'medium';
     }
@@ -85,14 +118,11 @@ function resolveSymbolConfidence(
     }
 
     const symbolName = symbol.getName().toLowerCase();
-    
-    // Extract schema path keywords (e.g. "GET /users.response.200.email" -> ["users", "email"])
     const pathKeywords = schemaPath
       .toLowerCase()
       .split(/[\/\.\s_]+/)
       .filter(k => k && k !== 'response' && k !== 'get' && k !== 'post' && k !== 'put' && k !== 'delete' && k !== '200');
 
-    // Check if the symbol name matches keywords from the OpenAPI schema path
     const isSymbolMatch = pathKeywords.some(keyword => {
       if (keyword.length <= 2) return false;
       const singular = keyword.endsWith('s') ? keyword.slice(0, -1) : keyword;
@@ -103,7 +133,94 @@ function resolveSymbolConfidence(
       return 'confirmed';
     }
 
-    // Check if symbol belongs to a declared Interface, TypeAlias, or Class in the project
+    const declarations = symbol.getDeclarations();
+    const hasInterfaceOrTypeDecl = declarations.some(
+      decl =>
+        decl.getKind() === SyntaxKind.InterfaceDeclaration ||
+        decl.getKind() === SyntaxKind.TypeAliasDeclaration ||
+        decl.getKind() === SyntaxKind.ClassDeclaration
+    );
+
+    if (hasInterfaceOrTypeDecl) {
+      return 'confirmed';
+    }
+
+    return 'high';
+  } catch {
+    return 'medium';
+  }
+}
+
+function resolveBindingElementConfidence(
+  element: BindingElement,
+  schemaPath: string
+): 'confirmed' | 'high' | 'medium' {
+  try {
+    const ancestor = element.getFirstAncestor(
+      node =>
+        node.getKind() === SyntaxKind.VariableDeclaration ||
+        node.getKind() === SyntaxKind.Parameter
+    );
+
+    if (!ancestor) {
+      return 'medium';
+    }
+
+    const pathKeywords = schemaPath
+      .toLowerCase()
+      .split(/[\/\.\s_]+/)
+      .filter(k => k && k !== 'response' && k !== 'get' && k !== 'post' && k !== 'put' && k !== 'delete' && k !== '200');
+
+    let targetType;
+    let typeNodeText = '';
+
+    if (ancestor.getKind() === SyntaxKind.VariableDeclaration) {
+      const varDecl = ancestor.asKind(SyntaxKind.VariableDeclaration);
+      const initializer = varDecl?.getInitializer();
+      if (initializer) {
+        targetType = initializer.getType();
+      } else {
+        targetType = varDecl?.getTypeNode()?.getType() || varDecl?.getType();
+      }
+      typeNodeText = varDecl?.getTypeNode()?.getText() || '';
+    } else if (ancestor.getKind() === SyntaxKind.Parameter) {
+      const paramDecl = ancestor.asKind(SyntaxKind.Parameter);
+      targetType = paramDecl?.getTypeNode()?.getType() || paramDecl?.getType();
+      typeNodeText = paramDecl?.getTypeNode()?.getText() || '';
+    }
+
+    if (typeNodeText) {
+      const typeTextLower = typeNodeText.toLowerCase();
+      const isTypeNodeMatch = pathKeywords.some(keyword => {
+        if (keyword.length <= 2) return false;
+        const singular = keyword.endsWith('s') ? keyword.slice(0, -1) : keyword;
+        return typeTextLower.includes(keyword) || typeTextLower.includes(singular);
+      });
+      if (isTypeNodeMatch) {
+        return 'confirmed';
+      }
+    }
+
+    if (!targetType || targetType.isAny() || targetType.isUnknown()) {
+      return typeNodeText ? 'high' : 'medium';
+    }
+
+    const symbol = targetType.getSymbol() || targetType.getAliasSymbol();
+    if (!symbol) {
+      return typeNodeText ? 'high' : 'medium';
+    }
+
+    const symbolName = symbol.getName().toLowerCase();
+    const isSymbolMatch = pathKeywords.some(keyword => {
+      if (keyword.length <= 2) return false;
+      const singular = keyword.endsWith('s') ? keyword.slice(0, -1) : keyword;
+      return symbolName.includes(keyword) || symbolName.includes(singular);
+    });
+
+    if (isSymbolMatch) {
+      return 'confirmed';
+    }
+
     const declarations = symbol.getDeclarations();
     const hasInterfaceOrTypeDecl = declarations.some(
       decl =>
