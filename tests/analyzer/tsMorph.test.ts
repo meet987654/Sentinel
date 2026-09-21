@@ -76,6 +76,116 @@ describe('ts-morph Consumer Analyzer', () => {
     });
   });
 
+  it('should detect destructured property assignments in variable declarations', () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    project.createSourceFile('src/types/api.ts', `
+      export interface MemberResponse {
+        id: string;
+        university: string;
+      }
+    `);
+
+    project.createSourceFile('src/pages/community.tsx', `
+      import { MemberResponse } from '../types/api';
+
+      export function CommunityPage(res: MemberResponse) {
+        const { university } = res;
+        return <div>{university}</div>;
+      }
+    `);
+
+    const breakingChanges: BreakingChange[] = [
+      {
+        type: 'FIELD_REMOVED',
+        severity: 'breaking',
+        path: 'Member.university',
+      }
+    ];
+
+    const findings = analyzeConsumersFromProject(project, breakingChanges);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      confidence: 'confirmed',
+      filePath: 'src/pages/community.tsx',
+      property: 'university',
+    });
+    expect(findings[0].snippet).toContain('const { university } = res;');
+  });
+
+  it('should detect nested and aliased destructuring', () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    project.createSourceFile('src/types/api.ts', `
+      export interface MemberResponse {
+        profile: {
+          university: string;
+        };
+      }
+    `);
+
+    project.createSourceFile('src/components/MemberRow.tsx', `
+      import { MemberResponse } from '../types/api';
+
+      export function MemberRow({ res }: { res: MemberResponse }) {
+        const { profile: { university: uni } } = res;
+        return <div>{uni}</div>;
+      }
+    `);
+
+    const breakingChanges: BreakingChange[] = [
+      {
+        type: 'FIELD_REMOVED',
+        severity: 'breaking',
+        path: 'Member.university',
+      }
+    ];
+
+    const findings = analyzeConsumersFromProject(project, breakingChanges);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      filePath: 'src/components/MemberRow.tsx',
+      property: 'university',
+    });
+  });
+
+  it('should detect destructured function parameter declarations', () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    project.createSourceFile('src/types/api.ts', `
+      export interface MemberResponse {
+        university: string;
+      }
+    `);
+
+    project.createSourceFile('src/components/Card.tsx', `
+      import { MemberResponse } from '../types/api';
+
+      export function Card({ university }: MemberResponse) {
+        return <div>{university}</div>;
+      }
+    `);
+
+    const breakingChanges: BreakingChange[] = [
+      {
+        type: 'FIELD_REMOVED',
+        severity: 'breaking',
+        path: 'Member.university',
+      }
+    ];
+
+    const findings = analyzeConsumersFromProject(project, breakingChanges);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      confidence: 'confirmed',
+      filePath: 'src/components/Card.tsx',
+      property: 'university',
+    });
+  });
+
   it('should ignore array markers and status codes when extracting property names', () => {
     const project = new Project({ useInMemoryFileSystem: true });
     
