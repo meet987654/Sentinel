@@ -186,6 +186,89 @@ describe('ts-morph Consumer Analyzer', () => {
     });
   });
 
+  it('should detect property accesses inside array iterator callbacks (map, filter, reduce)', () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    project.createSourceFile('src/types/api.ts', `
+      export interface MemberResponse {
+        id: string;
+        university: string;
+      }
+    `);
+
+    project.createSourceFile('src/components/MemberList.tsx', `
+      import { MemberResponse } from '../types/api';
+
+      export function MemberList({ members }: { members: MemberResponse[] }) {
+        return (
+          <div>
+            {members.map((member) => (
+              <div key={member.id}>{member.university}</div>
+            ))}
+          </div>
+        );
+      }
+    `);
+
+    const breakingChanges: BreakingChange[] = [
+      {
+        type: 'FIELD_REMOVED',
+        severity: 'breaking',
+        path: 'Member.university',
+      }
+    ];
+
+    const findings = analyzeConsumersFromProject(project, breakingChanges);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      confidence: 'confirmed',
+      filePath: 'src/components/MemberList.tsx',
+      property: 'university',
+    });
+    expect(findings[0].snippet).toContain('member.university');
+  });
+
+  it('should trace property access passed as function arguments with line precision', () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    project.createSourceFile('src/types/api.ts', `
+      export interface MemberResponse {
+        university: string;
+      }
+    `);
+
+    project.createSourceFile('src/utils/format.ts', `import { MemberResponse } from '../types/api';
+
+function formatUni(name: string) { return name.toUpperCase(); }
+
+export function processMember(member: MemberResponse) {
+  const result = formatUni(
+    member.university
+  );
+  return result;
+}`);
+
+    const breakingChanges: BreakingChange[] = [
+      {
+        type: 'FIELD_REMOVED',
+        severity: 'breaking',
+        path: 'Member.university',
+      }
+    ];
+
+    const findings = analyzeConsumersFromProject(project, breakingChanges);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      confidence: 'confirmed',
+      filePath: 'src/utils/format.ts',
+      property: 'university',
+      lineNumber: 7,
+    });
+    expect(findings[0].snippet).toContain('member.university');
+  });
+
   it('should ignore array markers and status codes when extracting property names', () => {
     const project = new Project({ useInMemoryFileSystem: true });
     
