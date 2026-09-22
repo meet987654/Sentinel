@@ -42,7 +42,7 @@ export function analyzeConsumersFromProject(
     const relativePath = sourceFile.getFilePath().replace(/^[\/\\]/, '');
     const seen = new Set<string>();
 
-    // 1. Scan PropertyAccessExpressions (e.g. user.university)
+    // 1. Scan PropertyAccessExpressions (e.g. user.university or members.map(m => m.university))
     const propertyAccesses = sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression);
 
     for (const access of propertyAccesses) {
@@ -69,7 +69,7 @@ export function analyzeConsumersFromProject(
       }
     }
 
-    // 2. Scan BindingElements for destructuring (e.g. const { university } = user)
+    // 2. Scan BindingElements for destructuring (e.g. const { university } = user or members.map(({ university }) => ...))
     const bindingElements = sourceFile.getDescendantsOfKind(SyntaxKind.BindingElement);
 
     for (const element of bindingElements) {
@@ -106,13 +106,25 @@ function resolveSymbolConfidence(
 ): 'confirmed' | 'high' | 'medium' {
   try {
     const expr = access.getExpression();
-    const exprType = expr.getType();
+    let exprType = expr.getType();
+
+    if (exprType.isArray()) {
+      exprType = exprType.getArrayElementType() || exprType;
+    }
 
     if (exprType.isAny() || exprType.isUnknown()) {
       return 'medium';
     }
 
-    const symbol = exprType.getSymbol() || exprType.getAliasSymbol();
+    let symbol = exprType.getSymbol() || exprType.getAliasSymbol();
+    if (!symbol || symbol.getName() === 'Array') {
+      const typeArgs = exprType.getTypeArguments();
+      if (typeArgs.length > 0) {
+        const argType = typeArgs[0];
+        symbol = argType.getSymbol() || argType.getAliasSymbol() || symbol;
+      }
+    }
+
     if (!symbol) {
       return 'medium';
     }
@@ -201,11 +213,23 @@ function resolveBindingElementConfidence(
       }
     }
 
+    if (targetType && targetType.isArray()) {
+      targetType = targetType.getArrayElementType() || targetType;
+    }
+
     if (!targetType || targetType.isAny() || targetType.isUnknown()) {
       return typeNodeText ? 'high' : 'medium';
     }
 
-    const symbol = targetType.getSymbol() || targetType.getAliasSymbol();
+    let symbol = targetType.getSymbol() || targetType.getAliasSymbol();
+    if (!symbol || symbol.getName() === 'Array') {
+      const typeArgs = targetType.getTypeArguments();
+      if (typeArgs.length > 0) {
+        const argType = typeArgs[0];
+        symbol = argType.getSymbol() || argType.getAliasSymbol() || symbol;
+      }
+    }
+
     if (!symbol) {
       return typeNodeText ? 'high' : 'medium';
     }
