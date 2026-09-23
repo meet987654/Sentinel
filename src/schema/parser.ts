@@ -30,19 +30,24 @@ export async function parseOpenApi(content: string, filePath?: string, resolver?
   }
 
   // Dereference all $ref pointers so we have a flat, fully resolved object
-  let api;
-  if (resolver && filePath) {
-    const dummyUrl = `github://internal/${filePath}`;
-    // @ts-ignore - Ignoring pre-existing type mismatch with swagger-parser options
-    api = (await SwaggerParser.dereference(dummyUrl, rawObj, {
-      resolve: {
-        github: resolver,
-        file: false,
-        http: false,
-      }
-    })) as unknown as OpenAPIV3.Document;
-  } else {
-    api = (await SwaggerParser.dereference(rawObj)) as OpenAPIV3.Document;
+  let api: OpenAPIV3.Document;
+  try {
+    if (resolver && filePath) {
+      const dummyUrl = `github://internal/${filePath}`;
+      // @ts-ignore - Ignoring pre-existing type mismatch with swagger-parser options
+      api = (await SwaggerParser.dereference(dummyUrl, rawObj, {
+        resolve: {
+          github: resolver,
+          file: false,
+          http: false,
+        }
+      })) as unknown as OpenAPIV3.Document;
+    } else {
+      api = (await SwaggerParser.dereference(rawObj)) as OpenAPIV3.Document;
+    }
+  } catch (err) {
+    // If swagger-parser fails on partial/invalid refs, fallback to raw document
+    api = rawObj as OpenAPIV3.Document;
   }
 
   if (!api.paths) return { endpoints };
@@ -65,7 +70,7 @@ export async function parseOpenApi(content: string, filePath?: string, resolver?
               name: param.name,
               in: param.in as any,
               required: !!param.required,
-              schema: param.schema ? mapSchemaNode(param.schema as OpenAPIV3.SchemaObject) : undefined,
+              schema: param.schema ? mapSchemaNode(param.schema as OpenAPIV3.SchemaObject, new Set(), new Set(), api) : undefined,
             });
           }
         }
@@ -76,7 +81,7 @@ export async function parseOpenApi(content: string, filePath?: string, resolver?
           const reqBody = operation.requestBody as OpenAPIV3.RequestBodyObject;
           const contentSchema = reqBody.content?.['application/json']?.schema;
           if (contentSchema) {
-            requestBody = mapSchemaNode(contentSchema as OpenAPIV3.SchemaObject);
+            requestBody = mapSchemaNode(contentSchema as OpenAPIV3.SchemaObject, new Set(), new Set(), api);
           }
         }
 
@@ -89,9 +94,9 @@ export async function parseOpenApi(content: string, filePath?: string, resolver?
             const parsedStatus = parseInt(statusCode, 10);
             
             if (contentSchema && !isNaN(parsedStatus)) {
-              responses.set(parsedStatus, mapSchemaNode(contentSchema as OpenAPIV3.SchemaObject));
+              responses.set(parsedStatus, mapSchemaNode(contentSchema as OpenAPIV3.SchemaObject, new Set(), new Set(), api));
             } else if (contentSchema && statusCode === 'default') {
-              responses.set(200, mapSchemaNode(contentSchema as OpenAPIV3.SchemaObject));
+              responses.set(200, mapSchemaNode(contentSchema as OpenAPIV3.SchemaObject, new Set(), new Set(), api));
             }
           }
         }
@@ -110,28 +115,69 @@ export async function parseOpenApi(content: string, filePath?: string, resolver?
   return { endpoints };
 }
 
-function mapSchemaNode(schema: OpenAPIV3.SchemaObject, visited = new Set<OpenAPIV3.SchemaObject>()): SchemaNode {
+export function mapSchemaNode(
+  schema: any,
+  visitedSchemas = new Set<any>(),
+  visitedRefs = new Set<string>(),
+  rootDoc?: any
+): SchemaNode {
+  if (!schema || typeof schema !== 'object') {
+    return { type: 'unknown', required: new Set() };
+  }
+
+  // Handle manual $ref pointer resolution if unresolved
+  if (schema.$ref && typeof schema.$ref === 'string' && rootDoc) {
+    const refStr = schema.$ref;
+    if (visitedRefs.has(refStr)) {
+      return { type: 'object', required: new Set() };
+    }
+    visitedRefs.add(refStr);
+    const resolved = resolveJsonPointer(refStr, rootDoc);
+    if (resolved) {
+      const result = mapSchemaNode(resolved, visitedSchemas, visitedRefs, rootDoc);
+      visitedRefs.delete(refStr);
+      return result;
+    }
+    visitedRefs.delete(refStr);
+  }
+
+  const rawType = Array.isArray(schema.type) ? schema.type[0] : (schema.type || 'object');
   const node: SchemaNode = {
-    type: Array.isArray(schema.type) ? schema.type[0] : (schema.type || 'unknown'),
+    type: rawType,
     required: new Set<string>(schema.required || []),
   };
 
-  if (visited.has(schema)) {
+  if (visitedSchemas.has(schema)) {
     return node;
   }
-  visited.add(schema);
+  visitedSchemas.add(schema);
 
   if (schema.properties) {
     node.properties = new Map<string, SchemaNode>();
     for (const [key, propSchema] of Object.entries(schema.properties)) {
-      node.properties.set(key, mapSchemaNode(propSchema as OpenAPIV3.SchemaObject, visited));
+      node.properties.set(key, mapSchemaNode(propSchema as OpenAPIV3.SchemaObject, visitedSchemas, visitedRefs, rootDoc));
     }
   }
 
   if ('items' in schema && schema.items) {
-    node.items = mapSchemaNode(schema.items as OpenAPIV3.SchemaObject, visited);
+    node.items = mapSchemaNode(schema.items as OpenAPIV3.SchemaObject, visitedSchemas, visitedRefs, rootDoc);
   }
 
-  visited.delete(schema);
+  visitedSchemas.delete(schema);
   return node;
+}
+
+export function resolveJsonPointer(pointer: string, doc: any): any {
+  if (!pointer || !pointer.startsWith('#/')) {
+    return undefined;
+  }
+  const parts = pointer.substring(2).split('/').map(p => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+  let current = doc;
+  for (const part of parts) {
+    if (!current || typeof current !== 'object' || !(part in current)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return current;
 }
