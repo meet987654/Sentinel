@@ -22,10 +22,14 @@ export interface SchemaNode {
   properties?: Map<string, SchemaNode>;
   required: Set<string>;
   items?: SchemaNode;
+  nullable?: boolean;
+  oneOf?: SchemaNode[];
+  anyOf?: SchemaNode[];
+  allOf?: SchemaNode[];
 }
 
 export interface BreakingChange {
-  type: 'ENDPOINT_REMOVED' | 'FIELD_REMOVED' | 'TYPE_CHANGED' | 'OPTIONAL_TO_REQUIRED';
+  type: 'ENDPOINT_REMOVED' | 'FIELD_REMOVED' | 'TYPE_CHANGED' | 'OPTIONAL_TO_REQUIRED' | 'VARIANT_REMOVED' | 'NULLABLE_REMOVED';
   severity: 'breaking' | 'warning' | 'safe';
   path: string; // e.g. "/users/{id}.GET.response.email"
   oldValue?: unknown;
