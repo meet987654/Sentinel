@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseOpenApi } from '../../src/schema/parser.js';
+import { parseOpenApi, resolveJsonPointer, mapSchemaNode } from '../../src/schema/parser.js';
 
 describe('OpenAPI Parser', () => {
   const sampleYaml = `
@@ -162,6 +162,74 @@ components:
     const resDefault = ep.responses.get(200);
     expect(resDefault).toBeDefined();
     expect(resDefault?.properties?.get('message')?.type).toBe('string');
+  });
+
+  it('should resolve deeply nested $ref schemas with dot-notation property chains', async () => {
+    const nestedRefYaml = `
+openapi: "3.0.0"
+info:
+  title: Nested Ref API
+  version: "1.0.0"
+paths:
+  /members:
+    get:
+      responses:
+        "200":
+          description: Member details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+components:
+  schemas:
+    Member:
+      type: object
+      properties:
+        id:
+          type: string
+        address:
+          $ref: "#/components/schemas/MemberAddress"
+    MemberAddress:
+      type: object
+      properties:
+        street:
+          type: string
+        university:
+          type: string
+`;
+
+    const result = await parseOpenApi(nestedRefYaml, 'openapi.yaml');
+    expect(result.endpoints.has('GET /members')).toBe(true);
+    const ep = result.endpoints.get('GET /members')!;
+    const res200 = ep.responses.get(200);
+    expect(res200).toBeDefined();
+
+    // Verify nested $ref properties address -> university
+    const addressProp = res200?.properties?.get('address');
+    expect(addressProp).toBeDefined();
+    expect(addressProp?.properties?.get('university')?.type).toBe('string');
+  });
+
+  it('should resolve raw JSON pointers using resolveJsonPointer helper', () => {
+    const doc = {
+      components: {
+        schemas: {
+          MemberAddress: {
+            type: 'object',
+            properties: {
+              university: { type: 'string' }
+            }
+          }
+        }
+      }
+    };
+
+    const resolved = resolveJsonPointer('#/components/schemas/MemberAddress', doc);
+    expect(resolved).toBeDefined();
+    expect(resolved.properties.university.type).toBe('string');
+
+    const invalid = resolveJsonPointer('#/invalid/path', doc);
+    expect(invalid).toBeUndefined();
   });
 
   it('should automatically fall back to parsing JSON if no filePath is specified', async () => {
