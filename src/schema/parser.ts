@@ -141,10 +141,23 @@ export function mapSchemaNode(
     visitedRefs.delete(refStr);
   }
 
-  const rawType = Array.isArray(schema.type) ? schema.type[0] : (schema.type || 'object');
+  let rawType = 'object';
+  let isNullable = false;
+
+  if (Array.isArray(schema.type)) {
+    rawType = schema.type.find((t: string) => t !== 'null') || schema.type[0] || 'object';
+    isNullable = schema.type.includes('null');
+  } else if (schema.type) {
+    rawType = schema.type;
+    isNullable = !!schema.nullable;
+  } else {
+    isNullable = !!schema.nullable;
+  }
+
   const node: SchemaNode = {
     type: rawType,
     required: new Set<string>(schema.required || []),
+    nullable: isNullable,
   };
 
   if (visitedSchemas.has(schema)) {
@@ -157,6 +170,31 @@ export function mapSchemaNode(
     for (const [key, propSchema] of Object.entries(schema.properties)) {
       node.properties.set(key, mapSchemaNode(propSchema as OpenAPIV3.SchemaObject, visitedSchemas, visitedRefs, rootDoc));
     }
+  }
+
+  if (Array.isArray(schema.allOf)) {
+    node.allOf = schema.allOf.map((sub: any) => mapSchemaNode(sub, visitedSchemas, visitedRefs, rootDoc));
+    if (!node.properties) node.properties = new Map<string, SchemaNode>();
+    for (const subNode of node.allOf) {
+      if (subNode.properties) {
+        for (const [k, v] of subNode.properties.entries()) {
+          if (!node.properties.has(k)) {
+            node.properties.set(k, v);
+          }
+        }
+      }
+      for (const req of subNode.required) {
+        node.required.add(req);
+      }
+    }
+  }
+
+  if (Array.isArray(schema.oneOf)) {
+    node.oneOf = schema.oneOf.map((sub: any) => mapSchemaNode(sub, visitedSchemas, visitedRefs, rootDoc));
+  }
+
+  if (Array.isArray(schema.anyOf)) {
+    node.anyOf = schema.anyOf.map((sub: any) => mapSchemaNode(sub, visitedSchemas, visitedRefs, rootDoc));
   }
 
   if ('items' in schema && schema.items) {
