@@ -1,19 +1,30 @@
 openapi: 3.0.0
 info:
-  title: Test API
+  title: Sentinel Community API
   version: 1.0.0
 paths:
-  /users:
+  /members:
     get:
+      summary: Get list of community members
       responses:
         '200':
-          description: OK
+          description: Successful response
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - email
-                properties:
-                  email:
-                    type: string
+                $ref: '#/components/schemas/MemberResponse'
+components:
+  schemas:
+    MemberResponse:
+      type: object
+      required:
+        - id
+        - name
+        - university
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        university:
+          type: string
