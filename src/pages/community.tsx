@@ -4,7 +4,7 @@ export function RenderMemberCard({ member }: { member: MemberResponse }) {
   return (
     <div className="member-card">
       <h3>{member.name}</h3>
-      <p>{member.university}</p>
+      <p>{member.college}</p>
     </div>
   );
 }
