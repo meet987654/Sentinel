@@ -3,6 +3,12 @@ import Fastify from 'fastify';
 import crypto from 'crypto';
 import { handlePullRequestEvent } from './github/app.js';
 
+/**
+ * Sentinel Webhook Receiver Server (Fastify)
+ * Listens for GitHub Pull Request webhook payloads and routes them asynchronously
+ * to the OpenAPI schema differ and ts-morph AST analyzer engine.
+ */
+
 const fastify = Fastify({
   logger: true,
 });
