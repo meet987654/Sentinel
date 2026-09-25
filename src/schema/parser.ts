@@ -175,7 +175,7 @@ export function mapSchemaNode(
   if (Array.isArray(schema.allOf)) {
     node.allOf = schema.allOf.map((sub: any) => mapSchemaNode(sub, visitedSchemas, visitedRefs, rootDoc));
     if (!node.properties) node.properties = new Map<string, SchemaNode>();
-    for (const subNode of node.allOf) {
+    for (const subNode of node.allOf || []) {
       if (subNode.properties) {
         for (const [k, v] of subNode.properties.entries()) {
           if (!node.properties.has(k)) {
