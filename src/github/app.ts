@@ -4,6 +4,7 @@ import { diffSchemas } from '../schema/differ.js';
 import { analyzeConsumersFromProject } from '../analyzer/tsMorph.js';
 import { generateSummary } from '../llm/summarizer.js';
 import { createCheckRun, createOrUpdateComment } from './reporter.js';
+import { parseConfig, SentinelConfig } from '../config.js';
 import { ChangeReport, ConsumerFinding } from '../types.js';
 import { Project } from 'ts-morph';
 import yaml from 'js-yaml';
@@ -32,20 +33,19 @@ export async function handlePullRequestEvent(payload: any) {
   console.log(`Processing PR #${prNumber} on ${owner}/${repo}`);
   const octokit = await app.getInstallationOctokit(installationId);
 
-  // 1. Check for per-repo configuration
-  let schemaFilePath = SCHEMA_FILE_PATH;
+  // 1. Check for per-repo configuration (.sentinel.yml)
+  let sentinelConfig: SentinelConfig = parseConfig();
   try {
     const configContent = await getFileContent(octokit, owner, repo, '.sentinel.yml', headRef);
     if (configContent) {
-      const config = yaml.load(configContent) as any;
-      if (config && config.schemaPath) {
-        schemaFilePath = config.schemaPath;
-        console.log(`Loaded custom schema path from .sentinel.yml: ${schemaFilePath}`);
-      }
+      sentinelConfig = parseConfig(configContent);
+      console.log(`Loaded custom config from .sentinel.yml: schemaPath=${sentinelConfig.schemaPath}, ignorePaths=${sentinelConfig.ignorePaths.length}`);
     }
   } catch (error) {
-    console.log('Failed to parse .sentinel.yml or no custom schema path found, using default.');
+    console.log('Failed to fetch or parse .sentinel.yml, using default configuration.');
   }
+
+  let schemaFilePath = sentinelConfig.schemaPath || SCHEMA_FILE_PATH;
 
   // 2. Check if the schema file changed in this PR
   const files = await octokit.rest.pulls.listFiles({
@@ -155,7 +155,7 @@ export async function handlePullRequestEvent(payload: any) {
       }
     }));
 
-    findings = analyzeConsumersFromProject(tsMorphProject, changes);
+    findings = analyzeConsumersFromProject(tsMorphProject, changes, sentinelConfig.ignorePaths);
 
     // 5. Generate LLM Summary
     summary = await generateSummary(changes, findings);

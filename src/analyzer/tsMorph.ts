@@ -1,20 +1,23 @@
 import { Project, SyntaxKind, PropertyAccessExpression, BindingElement } from 'ts-morph';
 import { BreakingChange, ConsumerFinding } from '../types.js';
+import { shouldIgnoreFile } from '../config.js';
 
 export function analyzeConsumers(
   workspaceDir: string,
-  changes: BreakingChange[]
+  changes: BreakingChange[],
+  ignorePaths?: string[]
 ): ConsumerFinding[] {
   const project = new Project();
   project.addSourceFilesAtPaths(`${workspaceDir}/**/*.ts`);
   project.addSourceFilesAtPaths(`${workspaceDir}/**/*.tsx`);
 
-  return analyzeConsumersFromProject(project, changes);
+  return analyzeConsumersFromProject(project, changes, ignorePaths);
 }
 
 export function analyzeConsumersFromProject(
   project: Project,
-  changes: BreakingChange[]
+  changes: BreakingChange[],
+  ignorePaths: string[] = []
 ): ConsumerFinding[] {
   const findings: ConsumerFinding[] = [];
 
@@ -35,11 +38,16 @@ export function analyzeConsumersFromProject(
   }
 
   for (const sourceFile of project.getSourceFiles()) {
-    if (sourceFile.getFilePath().includes('node_modules') || sourceFile.getFilePath().includes('dist')) {
+    const relativePath = sourceFile.getFilePath().replace(/^[\/\\]/, '');
+
+    if (
+      relativePath.includes('node_modules') ||
+      relativePath.includes('dist') ||
+      shouldIgnoreFile(relativePath, ignorePaths)
+    ) {
       continue;
     }
 
-    const relativePath = sourceFile.getFilePath().replace(/^[\/\\]/, '');
     const seen = new Set<string>();
 
     // 1. Scan PropertyAccessExpressions (e.g. user.university or members.map(m => m.university))
