@@ -1,5 +1,7 @@
 import { BreakingChange, ChangeReport, ConsumerFinding } from '../types.js';
 
+export const SENTINEL_SIGNATURE_TAG = '<!-- sentinel-impact-report -->';
+
 export async function createOrUpdateComment(
   octokit: any,
   owner: string,
@@ -7,9 +9,10 @@ export async function createOrUpdateComment(
   prNumber: number,
   report: ChangeReport
 ) {
-  const commentBody = formatComment(report);
+  const timestamp = new Date().toISOString();
+  const commentBody = formatComment(report, timestamp);
 
-  // Find existing comment
+  // Find existing comment using signature tag or header
   const comments = await octokit.rest.issues.listComments({
     owner,
     repo,
@@ -17,7 +20,7 @@ export async function createOrUpdateComment(
   });
 
   const existingComment = comments.data.find((c: any) =>
-    c.body?.includes('## 🛡️ Sentinel — API Contract Check')
+    c.body?.includes(SENTINEL_SIGNATURE_TAG) || c.body?.includes('## 🛡️ Sentinel — API Contract Check')
   );
 
   if (existingComment) {
@@ -117,11 +120,11 @@ function findLineNumber(content: string, path: string, changeType: string): numb
   return startSearchLine;
 }
 
-function formatComment(report: ChangeReport): string {
+export function formatComment(report: ChangeReport, timestamp?: string): string {
   const breakingCount = report.changes.filter(c => c.severity === 'breaking').length;
   const warningCount = report.changes.filter(c => c.severity === 'warning').length;
 
-  let markdown = `## 🛡️ Sentinel — API Contract Check\n\n`;
+  let markdown = `${SENTINEL_SIGNATURE_TAG}\n## 🛡️ Sentinel — API Contract Check\n\n`;
 
   if (breakingCount === 0) {
     markdown += `✅ **No breaking changes detected.**\n`;
@@ -130,6 +133,9 @@ function formatComment(report: ChangeReport): string {
       report.changes.filter(c => c.severity === 'warning').forEach(c => {
         markdown += `- \`${c.path}\`: ${c.type}\n`;
       });
+    }
+    if (timestamp) {
+      markdown += `\n---\n*Last updated by Sentinel at: \`${timestamp}\`*\n`;
     }
     return markdown;
   }
@@ -197,6 +203,10 @@ function formatComment(report: ChangeReport): string {
   }
 
   markdown += `Merge status: **BLOCKED** (${breakingCount} breaking changes found)\n`;
+
+  if (timestamp) {
+    markdown += `\n---\n*Last updated by Sentinel at: \`${timestamp}\`*\n`;
+  }
 
   return markdown;
 }
