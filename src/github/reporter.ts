@@ -52,6 +52,8 @@ export async function createCheckRun(
   const breakingCount = report.changes.filter(c => c.severity === 'breaking').length;
   
   const annotations: any[] = [];
+
+  // 1. Spec file annotations
   for (const change of report.changes) {
     const line = findLineNumber(prContent, change.path, change.type);
     annotations.push({
@@ -59,12 +61,26 @@ export async function createCheckRun(
       start_line: line,
       end_line: line,
       annotation_level: change.severity === 'breaking' ? 'failure' : 'warning',
-      message: `${change.severity.toUpperCase()} CHANGE: ${change.type} - ${change.path.split('.').pop()}`
+      message: `${change.severity.toUpperCase()} CHANGE: ${change.type} - ${change.path.split('.').pop()}`,
+      title: `Sentinel: ${change.type}`,
+    });
+  }
+
+  // 2. Consumer file annotations
+  for (const finding of report.findings) {
+    annotations.push({
+      path: finding.filePath,
+      start_line: finding.lineNumber,
+      end_line: finding.lineNumber,
+      annotation_level: 'warning',
+      message: `[${finding.confidence.toUpperCase()}] Property '${finding.property}' accesses a modified or removed API property in ${schemaFilePath}.`,
+      title: `Sentinel Consumer Impact (${finding.confidence.toUpperCase()})`,
     });
   }
 
   // GitHub allows max 50 annotations per request.
   const batch = annotations.slice(0, 50);
+  const summaryText = formatCheckRunSummary(report, schemaFilePath);
 
   await octokit.rest.checks.create({
     owner,
@@ -74,11 +90,48 @@ export async function createCheckRun(
     status: 'completed',
     conclusion: breakingCount > 0 ? 'failure' : 'success',
     output: {
-      title: breakingCount > 0 ? `${breakingCount} breaking changes found` : 'API Contract is safe',
-      summary: report.summary || 'Completed schema diff analysis.',
+      title: breakingCount > 0 ? `🚨 ${breakingCount} Breaking API Contract Change(s)` : '✅ API Contract Safe (0 Breaking Changes)',
+      summary: summaryText,
       annotations: batch.length > 0 ? batch : undefined
     }
   });
+}
+
+export function formatCheckRunSummary(report: ChangeReport, schemaFilePath: string = 'openapi.yaml'): string {
+  const breakingCount = report.changes.filter(c => c.severity === 'breaking').length;
+  const warningCount = report.changes.filter(c => c.severity === 'warning').length;
+  const confirmedFindings = report.findings.filter(f => f.confidence === 'confirmed').length;
+
+  let summary = `## 🛡️ Sentinel API Impact Check Summary\n\n`;
+
+  summary += `| Metric | Value | Status |\n`;
+  summary += `| :--- | :--- | :--- |\n`;
+  summary += `| ⚠️ **Breaking Schema Changes** | \`${breakingCount}\` | ${breakingCount > 0 ? '❌ Failure' : '✅ Safe'} |\n`;
+  summary += `| 🔍 **Warning Changes** | \`${warningCount}\` | ${warningCount > 0 ? '⚠️ Warning' : '✅ Clean'} |\n`;
+  summary += `| 🎯 **Confirmed Consumer Usages** | \`${confirmedFindings}\` | ${confirmedFindings > 0 ? '🚨 High Impact' : '✅ None'} |\n`;
+  summary += `| 📄 **Schema File** | \`${schemaFilePath}\` | 📌 Primary Contract |\n\n`;
+
+  if (report.changes.length > 0) {
+    summary += `### 📊 Contract Changes Breakdown\n`;
+    for (const change of report.changes) {
+      summary += `- **${change.severity.toUpperCase()}**: \`${change.path}\` (${change.type})\n`;
+    }
+    summary += `\n`;
+  }
+
+  if (report.findings.length > 0) {
+    summary += `### 🔍 Consumer Line Annotations (${report.findings.length})\n`;
+    for (const f of report.findings) {
+      summary += `- \`${f.filePath}:${f.lineNumber}\` [${f.confidence.toUpperCase()}]: \`${f.snippet}\`\n`;
+    }
+    summary += `\n`;
+  }
+
+  if (report.summary) {
+    summary += `### 💡 Evidence Summary\n${report.summary}\n`;
+  }
+
+  return summary;
 }
 
 function findLineNumber(content: string, path: string, changeType: string): number {
