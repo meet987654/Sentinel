@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createOrUpdateComment, formatComment, SENTINEL_SIGNATURE_TAG } from '../src/github/reporter.js';
+import { createOrUpdateComment, createCheckRun, formatComment, formatCheckRunSummary, SENTINEL_SIGNATURE_TAG } from '../src/github/reporter.js';
 import { ChangeReport } from '../src/types.js';
 
 describe('In-Place PR Comment Threading & Delta Updates (reporter.ts)', () => {
@@ -106,3 +106,93 @@ describe('In-Place PR Comment Threading & Delta Updates (reporter.ts)', () => {
     expect(mockOctokit.rest.issues.updateComment).not.toHaveBeenCalled();
   });
 });
+
+describe('GitHub Check Run Rich Annotations & Summary Badges (createCheckRun)', () => {
+  it('should format rich markdown summary metric tables in formatCheckRunSummary', () => {
+    const mockReport: ChangeReport = {
+      changes: [
+        {
+          type: 'FIELD_REMOVED',
+          severity: 'breaking',
+          path: 'MemberResponse.university',
+        }
+      ],
+      findings: [
+        {
+          confidence: 'confirmed',
+          filePath: 'src/pages/community.tsx',
+          lineNumber: 67,
+          snippet: 'member.university',
+          property: 'university',
+        }
+      ],
+      summary: 'Breaking change evidence summary.',
+    };
+
+    const summaryMarkdown = formatCheckRunSummary(mockReport, 'api/openapi.yaml');
+    expect(summaryMarkdown).toContain('## 🛡️ Sentinel API Impact Check Summary');
+    expect(summaryMarkdown).toContain('| ⚠️ **Breaking Schema Changes** | `1` | ❌ Failure |');
+    expect(summaryMarkdown).toContain('| 🎯 **Confirmed Consumer Usages** | `1` | 🚨 High Impact |');
+    expect(summaryMarkdown).toContain('`api/openapi.yaml`');
+    expect(summaryMarkdown).toContain('src/pages/community.tsx:67');
+  });
+
+  it('should construct failure check run with both spec and consumer annotations', async () => {
+    const mockOctokit = {
+      rest: {
+        checks: {
+          create: vi.fn().mockResolvedValue({}),
+        }
+      }
+    };
+
+    const mockReport: ChangeReport = {
+      changes: [
+        {
+          type: 'FIELD_REMOVED',
+          severity: 'breaking',
+          path: 'GET /members.response.200.university',
+        }
+      ],
+      findings: [
+        {
+          confidence: 'confirmed',
+          filePath: 'src/pages/community.tsx',
+          lineNumber: 67,
+          snippet: 'member.university',
+          property: 'university',
+        }
+      ],
+      summary: 'Schema change summary.',
+    };
+
+    await createCheckRun(mockOctokit, 'owner', 'repo', 'head_sha_123', mockReport, 'openapi.yaml', 'paths:\n  /members:');
+
+    expect(mockOctokit.rest.checks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: 'owner',
+        repo: 'repo',
+        name: 'Sentinel API Check',
+        head_sha: 'head_sha_123',
+        status: 'completed',
+        conclusion: 'failure',
+        output: expect.objectContaining({
+          title: expect.stringContaining('1 Breaking API Contract Change(s)'),
+          summary: expect.stringContaining('Sentinel API Impact Check Summary'),
+          annotations: expect.arrayContaining([
+            expect.objectContaining({
+              path: 'openapi.yaml',
+              annotation_level: 'failure',
+            }),
+            expect.objectContaining({
+              path: 'src/pages/community.tsx',
+              start_line: 67,
+              annotation_level: 'warning',
+            })
+          ]),
+        })
+      })
+    );
+  });
+});
+
