@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "A GitHub-native bot that detects breaking API changes and flags affected code.",
   "main": "dist/server.js",
+  "bin": {
+    "sentinel": "bin/sentinel.js"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -14,6 +17,7 @@
     "@apidevtools/swagger-parser": "^10.1.0",
     "@octokit/auth-app": "^6.1.1",
     "@octokit/webhooks": "^13.0.0",
+    "commander": "^15.0.0",
     "dotenv": "^16.4.5",
     "fastify": "^4.26.2",
     "groq-sdk": "^0.3.3",
