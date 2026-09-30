@@ -1,0 +1,48 @@
+================================================================================
+ISSUE #12 (GITHUB ISSUE #24): AGGREGATED MULTI-REPO IMPACT REPORT GENERATOR
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+When an API change impacts multiple consumer repositories across a GitHub Organization
+(e.g., `web-frontend`, `admin-dashboard`, `mobile-app`), Sentinel must aggregate findings
+across repositories into a unified, collapsible PR comment and Check Run summary.
+Engineers reviewing provider PRs can expand individual consumer repositories to view
+exact code snippets and follow deep links directly to the impacted source lines on GitHub.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/github/reporter.ts` & `src/types.ts`
+- Schema Enhancements:
+  - Added `repositoryName?: string` and `commitSha?: string` to `ConsumerFinding`.
+  - Added `RepoScanStatus` and `repoStatuses?: RepoScanStatus[]` to `ChangeReport`.
+- Core Functions & Reporting Features:
+  - `buildGitHubFileLineLink(filePath, lineNumber, repositoryName, commitSha, defaultOwner)`:
+    - Constructs deep GitHub line URLs:
+      `https://github.com/${fullRepo}/blob/${commitSha}/${filePath}#L${lineNumber}`
+    - Formats as markdown links: `[\`${filePath}:${lineNumber}\`](url)`.
+  - `formatComment(report, timestamp, options)`:
+    - Groups consumer findings by `repositoryName`.
+    - Computes summary badge: `Total Detected Usages: X across Y consumer repositories`.
+    - Renders collapsible `<details><summary>📦 repositoryName (N usages)</summary>` blocks.
+    - Within each repository block, groups usages by confidence level (CONFIRMED, HIGH, MEDIUM)
+      with direct line hyperlinks and code snippets.
+    - Renders organization repository permission statuses (e.g. `Unable to determine (Permission Denied)`).
+  - `formatCheckRunSummary(report, schemaFilePath)`:
+    - Includes `📦 Consumer Repositories` metric in Check Run summary tables.
+    - Annotates consumer file findings with repository prefixes (`[repoName] file:line`).
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/reporter.test.ts` (10 passing tests):
+  1. Hidden HTML signature tag formatting.
+  2. ISO timestamp footer formatting.
+  3. In-place PR comment updating vs creating new comments.
+  4. Rich Check Run summary metric table formatting.
+  5. Check Run creation with spec and consumer annotations.
+  6. Direct GitHub line URL construction in `buildGitHubFileLineLink`.
+  7. Multi-repository grouping into collapsible `<details><summary>` HTML blocks.
+  8. Direct deep line markdown links inside collapsible sections.
+  9. Repository permission warning rendering for inaccessible repositories.
+  10. Multi-repo consumer repository count metric in Check Run summary.
+- Total test suite: 53 passed (53) across 8 test files.

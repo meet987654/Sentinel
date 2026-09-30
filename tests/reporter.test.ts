@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createOrUpdateComment, createCheckRun, formatComment, formatCheckRunSummary, SENTINEL_SIGNATURE_TAG } from '../src/github/reporter.js';
+import { createOrUpdateComment, createCheckRun, formatComment, formatCheckRunSummary, buildGitHubFileLineLink, SENTINEL_SIGNATURE_TAG } from '../src/github/reporter.js';
 import { ChangeReport } from '../src/types.js';
 
 describe('In-Place PR Comment Threading & Delta Updates (reporter.ts)', () => {
@@ -193,6 +193,139 @@ describe('GitHub Check Run Rich Annotations & Summary Badges (createCheckRun)', 
         })
       })
     );
+  });
+});
+
+describe('Aggregated Multi-Repo Impact Report Generator', () => {
+  it('buildGitHubFileLineLink constructs direct github file line URLs', () => {
+    const linkWithOrg = buildGitHubFileLineLink('src/pages/community.tsx', 67, 'acme-corp/web-frontend', 'a1b2c3d');
+    expect(linkWithOrg).toBe('[`src/pages/community.tsx:67`](https://github.com/acme-corp/web-frontend/blob/a1b2c3d/src/pages/community.tsx#L67)');
+
+    const linkWithDefaultOwner = buildGitHubFileLineLink('src/utils.ts', 12, 'admin-dashboard', 'head123', 'acme-corp');
+    expect(linkWithDefaultOwner).toBe('[`src/utils.ts:12`](https://github.com/acme-corp/admin-dashboard/blob/head123/src/utils.ts#L12)');
+
+    const fallbackLink = buildGitHubFileLineLink('src/index.ts', 5);
+    expect(fallbackLink).toBe('`src/index.ts:5`');
+  });
+
+  it('groups findings across multiple repositories into collapsible HTML details blocks', () => {
+    const mockReport: ChangeReport = {
+      changes: [
+        {
+          type: 'FIELD_REMOVED',
+          severity: 'breaking',
+          path: 'GET /members.response.200.university',
+        }
+      ],
+      findings: [
+        {
+          confidence: 'confirmed',
+          filePath: 'src/pages/community.tsx',
+          lineNumber: 67,
+          snippet: 'member.university',
+          property: 'university',
+          repositoryName: 'acme-corp/web-frontend',
+          commitSha: 'sha111',
+        },
+        {
+          confidence: 'high',
+          filePath: 'src/components/MemberRow.tsx',
+          lineNumber: 31,
+          snippet: 'row.university',
+          property: 'university',
+          repositoryName: 'acme-corp/admin-dashboard',
+          commitSha: 'sha222',
+        },
+        {
+          confidence: 'medium',
+          filePath: 'src/screens/Profile.tsx',
+          lineNumber: 88,
+          snippet: 'user.university',
+          property: 'university',
+          repositoryName: 'acme-corp/web-frontend',
+          commitSha: 'sha111',
+        }
+      ],
+      summary: 'Aggregated cross-repo impact analysis.',
+    };
+
+    const markdown = formatComment(mockReport);
+
+    expect(markdown).toContain('### 🔍 Multi-Repository Consumer Impact');
+    expect(markdown).toContain('> **Total Detected Usages**: `3` across `2` consumer repositories.');
+
+    // Collapsible details blocks
+    expect(markdown).toContain('<details>');
+    expect(markdown).toContain('<summary><strong>📦 acme-corp/web-frontend</strong> (2 detected usages)</summary>');
+    expect(markdown).toContain('<summary><strong>📦 acme-corp/admin-dashboard</strong> (1 detected usage)</summary>');
+
+    // Deep markdown links
+    expect(markdown).toContain('[`src/pages/community.tsx:67`](https://github.com/acme-corp/web-frontend/blob/sha111/src/pages/community.tsx#L67)');
+    expect(markdown).toContain('[`src/components/MemberRow.tsx:31`](https://github.com/acme-corp/admin-dashboard/blob/sha222/src/components/MemberRow.tsx#L31)');
+  });
+
+  it('renders repository permission warnings cleanly when repo access was denied', () => {
+    const mockReport: ChangeReport = {
+      changes: [
+        {
+          type: 'FIELD_REMOVED',
+          severity: 'breaking',
+          path: 'GET /users.response.200.email',
+        }
+      ],
+      findings: [
+        {
+          confidence: 'confirmed',
+          filePath: 'src/app.ts',
+          lineNumber: 10,
+          snippet: 'user.email',
+          property: 'email',
+          repositoryName: 'acme-corp/public-service',
+        }
+      ],
+      repoStatuses: [
+        {
+          repositoryName: 'acme-corp/public-service',
+          status: 'analyzed',
+          findingCount: 1,
+        },
+        {
+          repositoryName: 'acme-corp/private-consumer',
+          status: 'permission_denied',
+          message: 'Unable to determine (Permission Denied)',
+        }
+      ]
+    };
+
+    const markdown = formatComment(mockReport);
+    expect(markdown).toContain('#### 🔒 Organization Repository Access & Permissions');
+    expect(markdown).toContain('- **acme-corp/private-consumer**: `Unable to determine (Permission Denied)`');
+  });
+
+  it('formats check run summary with multi-repo count metric', () => {
+    const mockReport: ChangeReport = {
+      changes: [
+        {
+          type: 'FIELD_REMOVED',
+          severity: 'breaking',
+          path: 'GET /orders.response.200.id',
+        }
+      ],
+      findings: [
+        {
+          confidence: 'confirmed',
+          filePath: 'src/orders.ts',
+          lineNumber: 15,
+          snippet: 'order.id',
+          property: 'id',
+          repositoryName: 'acme-corp/orders-ui',
+        }
+      ]
+    };
+
+    const summary = formatCheckRunSummary(mockReport);
+    expect(summary).toContain('| 📦 **Consumer Repositories** | `1` | 🌐 Multi-Repo |');
+    expect(summary).toContain('[acme-corp/orders-ui] `src/orders.ts:15`');
   });
 });
 

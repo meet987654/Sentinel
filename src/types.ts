@@ -42,10 +42,20 @@ export interface ConsumerFinding {
   lineNumber: number;
   snippet: string;
   property: string; // The property accessed, e.g. "email"
+  repositoryName?: string; // Optional repository name (e.g. "org/web-frontend" or "web-frontend")
+  commitSha?: string; // Optional commit sha for deep links
+}
+
+export interface RepoScanStatus {
+  repositoryName: string;
+  status: 'analyzed' | 'permission_denied' | 'not_installed' | 'error';
+  message?: string;
+  findingCount?: number;
 }
 
 export interface ChangeReport {
   changes: BreakingChange[];
   findings: ConsumerFinding[];
   summary?: string;
+  repoStatuses?: RepoScanStatus[];
 }

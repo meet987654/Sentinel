@@ -2,15 +2,42 @@ import { BreakingChange, ChangeReport, ConsumerFinding } from '../types.js';
 
 export const SENTINEL_SIGNATURE_TAG = '<!-- sentinel-impact-report -->';
 
+export interface ReportFormatOptions {
+  defaultOwner?: string;
+  defaultSha?: string;
+}
+
+export function buildGitHubFileLineLink(
+  filePath: string,
+  lineNumber: number,
+  repositoryName?: string,
+  commitSha?: string,
+  defaultOwner?: string
+): string {
+  if (!repositoryName) {
+    return `\`${filePath}:${lineNumber}\``;
+  }
+
+  let fullRepo = repositoryName;
+  if (!fullRepo.includes('/') && defaultOwner) {
+    fullRepo = `${defaultOwner}/${repositoryName}`;
+  }
+
+  const sha = commitSha || 'main';
+  const url = `https://github.com/${fullRepo}/blob/${sha}/${filePath}#L${lineNumber}`;
+  return `[\`${filePath}:${lineNumber}\`](${url})`;
+}
+
 export async function createOrUpdateComment(
   octokit: any,
   owner: string,
   repo: string,
   prNumber: number,
-  report: ChangeReport
+  report: ChangeReport,
+  options?: ReportFormatOptions
 ) {
   const timestamp = new Date().toISOString();
-  const commentBody = formatComment(report, timestamp);
+  const commentBody = formatComment(report, timestamp, { defaultOwner: owner, ...options });
 
   // Find existing comment using signature tag or header
   const comments = await octokit.rest.issues.listComments({
@@ -68,12 +95,13 @@ export async function createCheckRun(
 
   // 2. Consumer file annotations
   for (const finding of report.findings) {
+    const prefix = finding.repositoryName ? `[${finding.repositoryName}] ` : '';
     annotations.push({
       path: finding.filePath,
       start_line: finding.lineNumber,
       end_line: finding.lineNumber,
       annotation_level: 'warning',
-      message: `[${finding.confidence.toUpperCase()}] Property '${finding.property}' accesses a modified or removed API property in ${schemaFilePath}.`,
+      message: `${prefix}[${finding.confidence.toUpperCase()}] Property '${finding.property}' accesses a modified or removed API property in ${schemaFilePath}.`,
       title: `Sentinel Consumer Impact (${finding.confidence.toUpperCase()})`,
     });
   }
@@ -102,6 +130,17 @@ export function formatCheckRunSummary(report: ChangeReport, schemaFilePath: stri
   const warningCount = report.changes.filter(c => c.severity === 'warning').length;
   const confirmedFindings = report.findings.filter(f => f.confidence === 'confirmed').length;
 
+  const distinctRepos = new Set(
+    report.findings
+      .map(f => f.repositoryName)
+      .filter((r): r is string => Boolean(r))
+  );
+  if (report.repoStatuses) {
+    for (const s of report.repoStatuses) {
+      distinctRepos.add(s.repositoryName);
+    }
+  }
+
   let summary = `## 🛡️ Sentinel API Impact Check Summary\n\n`;
 
   summary += `| Metric | Value | Status |\n`;
@@ -109,6 +148,9 @@ export function formatCheckRunSummary(report: ChangeReport, schemaFilePath: stri
   summary += `| ⚠️ **Breaking Schema Changes** | \`${breakingCount}\` | ${breakingCount > 0 ? '❌ Failure' : '✅ Safe'} |\n`;
   summary += `| 🔍 **Warning Changes** | \`${warningCount}\` | ${warningCount > 0 ? '⚠️ Warning' : '✅ Clean'} |\n`;
   summary += `| 🎯 **Confirmed Consumer Usages** | \`${confirmedFindings}\` | ${confirmedFindings > 0 ? '🚨 High Impact' : '✅ None'} |\n`;
+  if (distinctRepos.size > 0) {
+    summary += `| 📦 **Consumer Repositories** | \`${distinctRepos.size}\` | 🌐 Multi-Repo |\n`;
+  }
   summary += `| 📄 **Schema File** | \`${schemaFilePath}\` | 📌 Primary Contract |\n\n`;
 
   if (report.changes.length > 0) {
@@ -122,7 +164,8 @@ export function formatCheckRunSummary(report: ChangeReport, schemaFilePath: stri
   if (report.findings.length > 0) {
     summary += `### 🔍 Consumer Line Annotations (${report.findings.length})\n`;
     for (const f of report.findings) {
-      summary += `- \`${f.filePath}:${f.lineNumber}\` [${f.confidence.toUpperCase()}]: \`${f.snippet}\`\n`;
+      const repoPrefix = f.repositoryName ? `[${f.repositoryName}] ` : '';
+      summary += `- ${repoPrefix}\`${f.filePath}:${f.lineNumber}\` [${f.confidence.toUpperCase()}]: \`${f.snippet}\`\n`;
     }
     summary += `\n`;
   }
@@ -173,7 +216,7 @@ function findLineNumber(content: string, path: string, changeType: string): numb
   return startSearchLine;
 }
 
-export function formatComment(report: ChangeReport, timestamp?: string): string {
+export function formatComment(report: ChangeReport, timestamp?: string, options?: ReportFormatOptions): string {
   const breakingCount = report.changes.filter(c => c.severity === 'breaking').length;
   const warningCount = report.changes.filter(c => c.severity === 'warning').length;
 
@@ -218,36 +261,110 @@ export function formatComment(report: ChangeReport, timestamp?: string): string 
     markdown += `\n`;
   }
 
-  markdown += `### 🔍 Likely Affected Code\n\n`;
-  if (report.findings.length === 0) {
-    markdown += `*No consumer usages found in this repository.*\n\n`;
+  const hasMultiRepoFindings = report.findings.some(f => Boolean(f.repositoryName));
+  const hasRepoStatuses = Boolean(report.repoStatuses && report.repoStatuses.length > 0);
+
+  if (hasMultiRepoFindings || hasRepoStatuses) {
+    markdown += `### 🔍 Multi-Repository Consumer Impact\n\n`;
+
+    const reposMap = new Map<string, ConsumerFinding[]>();
+    for (const finding of report.findings) {
+      const repoKey = finding.repositoryName || 'Current Repository';
+      if (!reposMap.has(repoKey)) reposMap.set(repoKey, []);
+      reposMap.get(repoKey)!.push(finding);
+    }
+
+    const totalUsages = report.findings.length;
+    const totalRepos = Math.max(reposMap.size, (report.repoStatuses?.length || 0));
+
+    markdown += `> **Total Detected Usages**: \`${totalUsages}\` across \`${totalRepos}\` consumer ${totalRepos === 1 ? 'repository' : 'repositories'}.\n\n`;
+
+    if (totalUsages === 0 && (!report.repoStatuses || report.repoStatuses.length === 0)) {
+      markdown += `*No consumer usages found across organization repositories.*\n\n`;
+    }
+
+    for (const [repoName, findings] of reposMap.entries()) {
+      const confirmed = findings.filter(f => f.confidence === 'confirmed');
+      const high = findings.filter(f => f.confidence === 'high');
+      const medium = findings.filter(f => f.confidence === 'medium');
+
+      markdown += `<details>\n`;
+      markdown += `<summary><strong>📦 ${repoName}</strong> (${findings.length} detected ${findings.length === 1 ? 'usage' : 'usages'})</summary>\n\n`;
+
+      if (confirmed.length > 0) {
+        markdown += `**CONFIRMED Source Usages (Statically Resolved)**\n`;
+        for (const f of confirmed) {
+          const link = buildGitHubFileLineLink(f.filePath, f.lineNumber, f.repositoryName, f.commitSha, options?.defaultOwner);
+          markdown += `- ${link} — \`${f.snippet}\`\n`;
+        }
+        markdown += `\n`;
+      }
+
+      if (high.length > 0) {
+        markdown += `**HIGH Confidence**\n`;
+        for (const f of high) {
+          const link = buildGitHubFileLineLink(f.filePath, f.lineNumber, f.repositoryName, f.commitSha, options?.defaultOwner);
+          markdown += `- ${link} — \`${f.snippet}\`\n`;
+        }
+        markdown += `\n`;
+      }
+
+      if (medium.length > 0) {
+        markdown += `**MEDIUM Confidence (Name Matched)**\n`;
+        for (const f of medium) {
+          const link = buildGitHubFileLineLink(f.filePath, f.lineNumber, f.repositoryName, f.commitSha, options?.defaultOwner);
+          markdown += `- ${link} — \`${f.snippet}\`\n`;
+        }
+        markdown += `\n`;
+      }
+
+      markdown += `</details>\n\n`;
+    }
+
+    if (report.repoStatuses && report.repoStatuses.length > 0) {
+      const inaccessible = report.repoStatuses.filter(s => s.status !== 'analyzed');
+      if (inaccessible.length > 0) {
+        markdown += `#### 🔒 Organization Repository Access & Permissions\n`;
+        for (const s of inaccessible) {
+          const msg = s.message || (s.status === 'permission_denied' ? 'Unable to determine (Permission Denied)' : s.status);
+          markdown += `- **${s.repositoryName}**: \`${msg}\`\n`;
+        }
+        markdown += `\n`;
+      }
+    }
   } else {
-    const confirmed = report.findings.filter(f => f.confidence === 'confirmed');
-    const high = report.findings.filter(f => f.confidence === 'high');
-    const medium = report.findings.filter(f => f.confidence === 'medium');
+    // Single repo output
+    markdown += `### 🔍 Likely Affected Code\n\n`;
+    if (report.findings.length === 0) {
+      markdown += `*No consumer usages found in this repository.*\n\n`;
+    } else {
+      const confirmed = report.findings.filter(f => f.confidence === 'confirmed');
+      const high = report.findings.filter(f => f.confidence === 'high');
+      const medium = report.findings.filter(f => f.confidence === 'medium');
 
-    if (confirmed.length > 0) {
-      markdown += `**CONFIRMED Source Usages (Statically Resolved)**\n`;
-      for (const f of confirmed) {
-        markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+      if (confirmed.length > 0) {
+        markdown += `**CONFIRMED Source Usages (Statically Resolved)**\n`;
+        for (const f of confirmed) {
+          markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+        }
+        markdown += `\n`;
       }
-      markdown += `\n`;
-    }
 
-    if (high.length > 0) {
-      markdown += `**HIGH Confidence**\n`;
-      for (const f of high) {
-        markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+      if (high.length > 0) {
+        markdown += `**HIGH Confidence**\n`;
+        for (const f of high) {
+          markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+        }
+        markdown += `\n`;
       }
-      markdown += `\n`;
-    }
 
-    if (medium.length > 0) {
-      markdown += `**MEDIUM Confidence (Name Matched)**\n`;
-      for (const f of medium) {
-        markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+      if (medium.length > 0) {
+        markdown += `**MEDIUM Confidence (Name Matched)**\n`;
+        for (const f of medium) {
+          markdown += `- \`${f.filePath}:${f.lineNumber}\` — \`${f.snippet}\`\n`;
+        }
+        markdown += `\n`;
       }
-      markdown += `\n`;
     }
   }
 
@@ -263,3 +380,4 @@ export function formatComment(report: ChangeReport, timestamp?: string): string 
 
   return markdown;
 }
+
