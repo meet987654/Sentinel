@@ -1,0 +1,43 @@
+================================================================================
+ISSUE #11 (GITHUB ISSUE #23): MULTI-REPO APP PERMISSIONS & INSTALLATION TOKEN MANAGER
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+When scanning external consumer repositories across a GitHub Organization, GitHub App
+authentication requires valid installation access tokens for each target repository.
+If an organization consumer repository does not have the GitHub App installed or grants
+insufficient permissions, Sentinel must handle the condition gracefully without
+throwing unhandled promise rejections or crashing the webhook runner.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/github/auth.ts`
+- Core Functions & Interfaces:
+  - `getConsumerRepoOctokit(owner, repo, options)`:
+    - Resolves the GitHub App installation ID for the specified consumer repository
+      via `appClient.rest.apps.getRepoInstallation({ owner, repo })`.
+    - Generates a repository-scoped installation token via `@octokit/auth-app`
+      `createAppAuth()`, limiting scope to `repositoryNames: [repo]` and
+      permissions `{ contents: 'read' }`.
+    - Instantiates and returns an authenticated `Octokit` client bound to the consumer
+      repository.
+    - Catches HTTP `404 Not Found` and `403 Forbidden` responses safely.
+    - Returns `{ octokit: null, status: 'permission_denied', errorMessage: 'Unable to determine (Permission Denied)' }`.
+  - `isPermissionError(error)`:
+    - Helper to detect 403/404 HTTP status codes across varied Octokit and Axios error
+      shapes.
+  - `PERMISSION_DENIED_MESSAGE`:
+    - Constant string `'Unable to determine (Permission Denied)'` for consistent reporting
+      across Sentinel check runs and aggregated PR summaries.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/auth.test.ts` (6 passing tests):
+  1. Status code validation in `isPermissionError()`.
+  2. Scoped installation token generation and Octokit instance creation.
+  3. Graceful handling of 404 Not Found (app not installed) with warning output.
+  4. Graceful handling of 403 Forbidden (permission denied) with warning output.
+  5. Safe handling of unexpected network errors without unhandled rejections.
+  6. Credential validation when `APP_ID` or `PRIVATE_KEY` is missing.
+- Total test suite: 49 passed (49) across 8 test files.
