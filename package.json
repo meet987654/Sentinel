@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "benchmark": "tsx scripts/benchmark.ts",
     "start": "node dist/server.js",
     "test": "vitest run"
   },

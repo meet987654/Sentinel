@@ -175,6 +175,18 @@ Repository Indexing → Symbol & Dependency Index → Incremental Analysis → T
 - **Targeted Consumer Scanning:** Restricts AST scanning only to consumers importing the affected API endpoints or types.
 - **Incremental Analysis & Caching:** Caches AST parsing results across commits to ensure low latency during CI/CD PR checks.
 
+### Empirical AST Performance Benchmarks
+
+| File Count ($N$) | Scan Time (Empirical) | Findings Detected | Heap Memory |
+| :---: | :---: | :---: | :---: |
+| **50 files** | `~178 ms` | 8 | ~29 MB |
+| **250 files** | `~198 ms` | 36 | ~23 MB |
+| **500 files** | `~282 ms` | 72 | ~36 MB |
+| **1,000 files** | `~998 ms` | 143 | ~39 MB |
+| **2,000 files** | `~1.55 s` | 286 | ~55 MB |
+
+> Run benchmarks locally via `npm run benchmark`. See [BENCHMARKS.md](file:///c:/Users/meetp/OneDrive/Desktop/Projects/sentinel/BENCHMARKS.md) for full benchmark documentation and latency breakdowns.
+
 ---
 
 ## Implementation Status
