@@ -1,3 +1,5 @@
+import fs from 'fs/promises';
+import path from 'path';
 import { Project, SourceFile, SyntaxKind } from 'ts-morph';
 import { shouldIgnoreFile } from '../config.js';
 
@@ -127,5 +129,93 @@ export function buildDependencyIndex(project: Project, options?: IndexerOptions)
     symbolToFiles,
     fileImports,
   };
+}
+
+/**
+ * Serializes the dependency index into a formatted JSON string.
+ */
+export function serializeDependencyIndex(index: DependencyIndex, pretty: boolean = true): string {
+  return JSON.stringify(index, null, pretty ? 2 : undefined);
+}
+
+/**
+ * Deserializes a JSON string into a validated DependencyIndex structure.
+ */
+export function deserializeDependencyIndex(jsonString: string): DependencyIndex {
+  const parsed = JSON.parse(jsonString);
+  if (!parsed || typeof parsed !== 'object' || !parsed.version) {
+    throw new Error('Invalid dependency index JSON: missing version or invalid format');
+  }
+  return {
+    version: parsed.version,
+    generatedAt: parsed.generatedAt || new Date().toISOString(),
+    repository: parsed.repository,
+    totalFiles: typeof parsed.totalFiles === 'number' ? parsed.totalFiles : 0,
+    typeToFiles: parsed.typeToFiles || {},
+    routeToFiles: parsed.routeToFiles || {},
+    symbolToFiles: parsed.symbolToFiles || {},
+    fileImports: parsed.fileImports || {},
+  };
+}
+
+/**
+ * Exports the dependency index snapshot as a JSON file (e.g. dependency-index.json).
+ */
+export async function exportDependencyIndexToFile(index: DependencyIndex, outputPath: string): Promise<void> {
+  const dir = path.dirname(outputPath);
+  await fs.mkdir(dir, { recursive: true });
+  const json = serializeDependencyIndex(index, true);
+  await fs.writeFile(outputPath, json, 'utf8');
+}
+
+/**
+ * Reads and deserializes a dependency index snapshot from a JSON file.
+ */
+export async function loadDependencyIndexFromFile(filePath: string): Promise<DependencyIndex> {
+  const content = await fs.readFile(filePath, 'utf8');
+  return deserializeDependencyIndex(content);
+}
+
+/**
+ * Looks up candidate consumer files that depend on any of the specified symbols, types, or API routes.
+ */
+export function lookupAffectedFiles(index: DependencyIndex, symbolsOrRoutes: string[]): string[] {
+  const matchingFiles = new Set<string>();
+
+  for (const item of symbolsOrRoutes) {
+    if (!item) continue;
+
+    // 1. Check exact symbol match
+    if (index.symbolToFiles[item]) {
+      for (const file of index.symbolToFiles[item]) {
+        matchingFiles.add(file);
+      }
+    }
+
+    // 2. Check exact type match
+    if (index.typeToFiles[item]) {
+      for (const file of index.typeToFiles[item]) {
+        matchingFiles.add(file);
+      }
+    }
+
+    // 3. Check route match or path prefix match
+    if (index.routeToFiles[item]) {
+      for (const file of index.routeToFiles[item]) {
+        matchingFiles.add(file);
+      }
+    } else {
+      const normalizedItem = item.toLowerCase();
+      for (const [route, files] of Object.entries(index.routeToFiles)) {
+        if (route.toLowerCase().includes(normalizedItem) || normalizedItem.includes(route.toLowerCase())) {
+          for (const file of files) {
+            matchingFiles.add(file);
+          }
+        }
+      }
+    }
+  }
+
+  return Array.from(matchingFiles).sort();
 }
 
