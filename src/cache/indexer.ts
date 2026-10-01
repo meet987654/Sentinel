@@ -44,7 +44,7 @@ export function buildDependencyIndex(project: Project, options?: IndexerOptions)
 
   for (const sourceFile of sourceFiles) {
     const rawPath = sourceFile.getFilePath();
-    const filePath = rawPath.replace(/\\/g, '/');
+    const filePath = rawPath.replace(/\\/g, '/').replace(/^\//, '');
 
     if (options?.ignorePaths && shouldIgnoreFile(filePath, options.ignorePaths)) {
       continue;
