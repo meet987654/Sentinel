@@ -1,0 +1,50 @@
+================================================================================
+ISSUE #13 (PHASE 4 ISSUE #1): SYMBOL & DEPENDENCY INDEX GENERATOR
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+Scanning thousands of TypeScript files on every pull request slows down CI checks.
+Sentinel requires a symbol and dependency index generator that pre-indexes consumer
+repositories, mapping imported endpoints, symbols, and data models to source files.
+When an API contract change occurs, Sentinel can rapidly isolate candidate files
+referencing modified types or routes, bypassing irrelevant source files.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/cache/indexer.ts`
+- Core Data Structures:
+  - `FileImportRecord`:
+    - Captures `moduleSpecifier`, `namedImports`, `defaultImport`, `namespaceImport`,
+      and `isTypeOnly` per imported module.
+  - `DependencyIndex`:
+    - `typeToFiles: Record<string, string[]>`: Maps imported interface/type names to files.
+    - `routeToFiles: Record<string, string[]>`: Maps literal endpoint routes (e.g. `/api/v1/users`) to files.
+    - `symbolToFiles: Record<string, string[]>`: Maps imported functions/symbols to files.
+    - `fileImports: Record<string, FileImportRecord[]>`: Detailed per-file import snapshot.
+    - `totalFiles`: Number of indexed source files.
+- Core Functions:
+  - `buildDependencyIndex(project, options)`:
+    - Traverses `ts-morph` AST source files.
+    - Scans `ImportDeclaration` nodes to extract named, default, and namespace imports.
+    - Scans `StringLiteral` and `NoSubstitutionTemplateLiteral` nodes for API route paths.
+    - Respects `ignorePaths` glob patterns (skipping tests and mocks).
+  - `serializeDependencyIndex(index, pretty)`:
+    - Serializes index cleanly to JSON string.
+  - `deserializeDependencyIndex(jsonString)`:
+    - Validates schema and converts JSON snapshot back into strongly-typed `DependencyIndex`.
+  - `exportDependencyIndexToFile(index, outputPath)` & `loadDependencyIndexFromFile(filePath)`:
+    - Reads and writes snapshots from disk (`dependency-index.json`).
+  - `lookupAffectedFiles(index, symbolsOrRoutes)`:
+    - Queries index for candidate source files matching modified types or endpoint routes.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/cache/indexer.test.ts` (6 passing tests):
+  1. Named, default, and namespace import mapping to symbols and types.
+  2. String literal and template literal route pattern detection.
+  3. `ignorePaths` glob pattern filtering.
+  4. Snapshot JSON serialization and deserialization integrity.
+  5. File export and reloading from disk.
+  6. Multi-symbol and route candidate file lookups in `lookupAffectedFiles`.
+- Total test suite: 59 passed (59) across 9 test files.
