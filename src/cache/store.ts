@@ -1,5 +1,8 @@
 import crypto from 'crypto';
-import { ConsumerFinding } from '../types.js';
+import { Project } from 'ts-morph';
+import { BreakingChange, ConsumerFinding } from '../types.js';
+import { shouldIgnoreFile } from '../config.js';
+import { analyzeSourceFile } from '../analyzer/tsMorph.js';
 
 export interface CacheKey {
   filePath: string;
@@ -108,3 +111,139 @@ export class MemoryCacheStore implements CacheStore {
     return this.cache.size;
   }
 }
+
+export interface IncrementalAnalysisOptions {
+  commitSha?: string;
+  ignorePaths?: string[];
+  cacheStore?: CacheStore;
+}
+
+export interface IncrementalAnalysisResult {
+  findings: ConsumerFinding[];
+  stats: {
+    totalFiles: number;
+    cachedFiles: number;
+    analyzedFiles: number;
+    cacheHitRatio: number;
+    durationMs: number;
+  };
+}
+
+/**
+ * Performs incremental AST property analysis over a Project,
+ * skipping unchanged files whose content hash matches the cached state.
+ */
+export async function analyzeConsumersIncremental(
+  project: Project,
+  changes: BreakingChange[],
+  options?: IncrementalAnalysisOptions
+): Promise<IncrementalAnalysisResult> {
+  const startTime = performance.now();
+  const cacheStore = options?.cacheStore || new MemoryCacheStore();
+  const ignorePaths = options?.ignorePaths || [];
+  const commitSha = options?.commitSha;
+
+  const propertyNamesToFind = new Map<string, string>();
+  for (const change of changes) {
+    if (change.type === 'FIELD_REMOVED' || change.type === 'TYPE_CHANGED') {
+      const parts = change.path.split('.');
+      const propertyName = parts[parts.length - 1];
+      if (propertyName !== '[]' && isNaN(parseInt(propertyName, 10))) {
+        propertyNamesToFind.set(propertyName, change.path);
+      }
+    }
+  }
+
+  const allFindings: ConsumerFinding[] = [];
+  let totalFiles = 0;
+  let cachedFiles = 0;
+  let analyzedFiles = 0;
+
+  if (propertyNamesToFind.size === 0) {
+    return {
+      findings: [],
+      stats: {
+        totalFiles: 0,
+        cachedFiles: 0,
+        analyzedFiles: 0,
+        cacheHitRatio: 0,
+        durationMs: 0,
+      }
+    };
+  }
+
+  for (const sourceFile of project.getSourceFiles()) {
+    const rawPath = sourceFile.getFilePath();
+    const relativePath = rawPath.replace(/\\/g, '/').replace(/^\//, '');
+
+    if (
+      relativePath.includes('node_modules') ||
+      relativePath.includes('dist') ||
+      shouldIgnoreFile(relativePath, ignorePaths)
+    ) {
+      continue;
+    }
+
+    totalFiles++;
+    const contentHash = generateContentHash(sourceFile.getFullText());
+
+    // Check cache for this file across all target properties
+    let allPropertiesCached = true;
+    const fileCachedFindings: ConsumerFinding[] = [];
+
+    for (const propName of propertyNamesToFind.keys()) {
+      const key: CacheKey = {
+        filePath: relativePath,
+        contentHash,
+        propertyName: propName,
+        commitSha,
+      };
+      const cached = await cacheStore.get(key);
+      if (cached) {
+        fileCachedFindings.push(...cached.findings);
+      } else {
+        allPropertiesCached = false;
+        break;
+      }
+    }
+
+    if (allPropertiesCached) {
+      // CACHE HIT: completely bypass ts-morph AST scanning for this file!
+      cachedFiles++;
+      allFindings.push(...fileCachedFindings);
+    } else {
+      // CACHE MISS: run fresh AST analysis
+      analyzedFiles++;
+      const fileFindings = analyzeSourceFile(sourceFile, propertyNamesToFind);
+      allFindings.push(...fileFindings);
+
+      // Group findings by propertyName and update cache
+      for (const propName of propertyNamesToFind.keys()) {
+        const propFindings = fileFindings.filter(f => f.property === propName);
+        const key: CacheKey = {
+          filePath: relativePath,
+          contentHash,
+          propertyName: propName,
+          commitSha,
+        };
+        await cacheStore.set(key, propFindings);
+      }
+    }
+  }
+
+  const endTime = performance.now();
+  const durationMs = Math.round((endTime - startTime) * 100) / 100;
+  const cacheHitRatio = totalFiles > 0 ? Math.round((cachedFiles / totalFiles) * 1000) / 1000 : 0;
+
+  return {
+    findings: allFindings,
+    stats: {
+      totalFiles,
+      cachedFiles,
+      analyzedFiles,
+      cacheHitRatio,
+      durationMs,
+    }
+  };
+}
+
