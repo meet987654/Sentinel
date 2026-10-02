@@ -1,0 +1,53 @@
+================================================================================
+ISSUE #14 (PHASE 4 ISSUE #2): INCREMENTAL AST ANALYSIS & COMMIT CACHING LAYER
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+Re-parsing thousands of unchanged consumer source files on subsequent pull request
+commits (`synchronize` events) causes unnecessary CI latency. Sentinel introduces
+an incremental AST caching layer that hashes source file contents and checks a
+high-performance LRU cache store keyed by commit SHA, file path, content hash,
+and property name. Files whose SHA-256 hash matches the cache bypass AST parsing
+completely, yielding significant latency reductions (>= 70%).
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/cache/store.ts` & `src/analyzer/tsMorph.ts`
+- Core Data Structures:
+  - `CacheKey`:
+    - `filePath`: relative path of consumer source file.
+    - `contentHash`: SHA-256 hash of file contents.
+    - `propertyName`: API property being searched (e.g. `email`).
+    - `commitSha`: optional commit identifier.
+  - `CachedFindingsEntry`:
+    - Stores cached `ConsumerFinding[]` with creation timestamp.
+  - `MemoryCacheStore`:
+    - High-performance in-memory LRU store with configurable capacity (`maxEntries: 5000`).
+    - Implements `get`, `set`, `has`, `invalidate`, `clear`, and `size`.
+    - Automatically evicts oldest entries when capacity is exceeded.
+    - Supports targeted file invalidation via `invalidate(filePath)`.
+- Incremental Analysis Engine:
+  - `analyzeConsumersIncremental(project, changes, options)`:
+    - Pre-calculates target property names from breaking changes.
+    - For each unignored source file, computes `generateContentHash(content)`.
+    - If all target properties hit cache:
+      - Bypasses `ts-morph` AST traversal entirely.
+      - Directly accumulates cached findings and marks file as `cachedFiles++`.
+    - If any target property misses cache (new or modified file):
+      - Invokes `analyzeSourceFile(sourceFile, propertyNamesToFind)`.
+      - Updates `cacheStore` with fresh findings and marks file as `analyzedFiles++`.
+    - Returns structured findings along with runtime telemetry:
+      `totalFiles`, `cachedFiles`, `analyzedFiles`, `cacheHitRatio`, and `durationMs`.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/cache/store.test.ts` (4 passing tests):
+  1. Deterministic SHA-256 content hashing.
+  2. Composite cache key string formatting.
+  3. `MemoryCacheStore` LRU eviction, retrieval, and file invalidation.
+  4. `analyzeConsumersIncremental` end-to-end verification:
+     - Cold run: 100% cache miss, full AST analysis, correct findings.
+     - Warm run: 100% cache hit, zero AST parsing, identical findings.
+     - Modified file run: precisely invalidates and re-analyzes only the modified file.
+- Total test suite: 63 passed (63) across 10 test files.

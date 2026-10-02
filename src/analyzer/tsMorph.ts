@@ -1,4 +1,4 @@
-import { Project, SyntaxKind, PropertyAccessExpression, BindingElement } from 'ts-morph';
+import { Project, SyntaxKind, PropertyAccessExpression, BindingElement, SourceFile } from 'ts-morph';
 import { BreakingChange, ConsumerFinding } from '../types.js';
 import { shouldIgnoreFile } from '../config.js';
 
@@ -48,65 +48,81 @@ export function analyzeConsumersFromProject(
       continue;
     }
 
-    const seen = new Set<string>();
+    const fileFindings = analyzeSourceFile(sourceFile, propertyNamesToFind);
+    findings.push(...fileFindings);
+  }
 
-    // 1. Scan PropertyAccessExpressions (e.g. user.university or members.map(m => m.university))
-    const propertyAccesses = sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression);
+  return findings;
+}
 
-    for (const access of propertyAccesses) {
-      const propName = access.getName();
+/**
+ * Analyzes a single SourceFile AST for target API property accesses and destructuring bindings.
+ */
+export function analyzeSourceFile(
+  sourceFile: SourceFile,
+  propertyNamesToFind: Map<string, string>
+): ConsumerFinding[] {
+  const findings: ConsumerFinding[] = [];
+  const relativePath = sourceFile.getFilePath().replace(/^[\/\\]/, '');
+  const seen = new Set<string>();
 
-      if (propertyNamesToFind.has(propName)) {
-        const schemaPath = propertyNamesToFind.get(propName) || '';
-        const line = sourceFile.getLineAndColumnAtPos(access.getStart()).line;
-        const lineText = sourceFile.getFullText().split('\n')[line - 1].trim();
-        const key = `${relativePath}:${line}:${propName}`;
+  // 1. Scan PropertyAccessExpressions (e.g. user.university or members.map(m => m.university))
+  const propertyAccesses = sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression);
 
-        if (!seen.has(key)) {
-          seen.add(key);
-          const confidence = resolveSymbolConfidence(access, schemaPath);
+  for (const access of propertyAccesses) {
+    const propName = access.getName();
 
-          findings.push({
-            confidence,
-            filePath: relativePath,
-            lineNumber: line,
-            snippet: lineText,
-            property: propName,
-          });
-        }
+    if (propertyNamesToFind.has(propName)) {
+      const schemaPath = propertyNamesToFind.get(propName) || '';
+      const line = sourceFile.getLineAndColumnAtPos(access.getStart()).line;
+      const lineText = sourceFile.getFullText().split('\n')[line - 1].trim();
+      const key = `${relativePath}:${line}:${propName}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        const confidence = resolveSymbolConfidence(access, schemaPath);
+
+        findings.push({
+          confidence,
+          filePath: relativePath,
+          lineNumber: line,
+          snippet: lineText,
+          property: propName,
+        });
       }
     }
+  }
 
-    // 2. Scan BindingElements for destructuring (e.g. const { university } = user or members.map(({ university }) => ...))
-    const bindingElements = sourceFile.getDescendantsOfKind(SyntaxKind.BindingElement);
+  // 2. Scan BindingElements for destructuring (e.g. const { university } = user or members.map(({ university }) => ...))
+  const bindingElements = sourceFile.getDescendantsOfKind(SyntaxKind.BindingElement);
 
-    for (const element of bindingElements) {
-      const propName = element.getPropertyNameNode()?.getText() || element.getName();
+  for (const element of bindingElements) {
+    const propName = element.getPropertyNameNode()?.getText() || element.getName();
 
-      if (propertyNamesToFind.has(propName)) {
-        const schemaPath = propertyNamesToFind.get(propName) || '';
-        const line = sourceFile.getLineAndColumnAtPos(element.getStart()).line;
-        const lineText = sourceFile.getFullText().split('\n')[line - 1].trim();
-        const key = `${relativePath}:${line}:${propName}`;
+    if (propertyNamesToFind.has(propName)) {
+      const schemaPath = propertyNamesToFind.get(propName) || '';
+      const line = sourceFile.getLineAndColumnAtPos(element.getStart()).line;
+      const lineText = sourceFile.getFullText().split('\n')[line - 1].trim();
+      const key = `${relativePath}:${line}:${propName}`;
 
-        if (!seen.has(key)) {
-          seen.add(key);
-          const confidence = resolveBindingElementConfidence(element, schemaPath);
+      if (!seen.has(key)) {
+        seen.add(key);
+        const confidence = resolveBindingElementConfidence(element, schemaPath);
 
-          findings.push({
-            confidence,
-            filePath: relativePath,
-            lineNumber: line,
-            snippet: lineText,
-            property: propName,
-          });
-        }
+        findings.push({
+          confidence,
+          filePath: relativePath,
+          lineNumber: line,
+          snippet: lineText,
+          property: propName,
+        });
       }
     }
   }
 
   return findings;
 }
+
 
 function resolveSymbolConfidence(
   access: PropertyAccessExpression,
