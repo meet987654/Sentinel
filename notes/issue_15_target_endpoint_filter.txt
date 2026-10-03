@@ -1,0 +1,57 @@
+================================================================================
+ISSUE #15 (PHASE 4 ISSUE #3): TARGET ENDPOINT CONSUMER FILTER
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+In large enterprise repositories with thousands of TypeScript/JavaScript files,
+instantiating and parsing full ASTs via ts-morph across every source file incurs
+significant overhead. Most consumer files never invoke the modified endpoints or
+reference the modified properties.
+
+Sentinel introduces a fast Target Endpoint Consumer Filter that acts as a
+pre-AST screening pass. Using lightweight regex and string matching, it filters out
+files that cannot possibly contain references to the breaking changes before
+ts-morph AST analysis begins, drastically reducing overall AST parsing load.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/analyzer/filter.ts`
+- Core Data Structures & Interfaces:
+  - `EndpointFilterOptions`:
+    - `includeExactMatchesOnly?: boolean`: whether to restrict search to full route paths.
+    - `additionalKeywords?: string[]`: optional extra keywords/symbols to match.
+  - `FilterCandidateResult`:
+    - `candidateFiles`: string array of matched file paths.
+    - `skippedFiles`: string array of filtered-out file paths.
+    - `targetRoutes`: routes extracted from breaking changes.
+    - `targetProperties`: properties extracted from breaking changes.
+    - `stats`: telemetry metrics (`totalFiles`, `candidateCount`, `filteredOutCount`, `filterRatio`).
+  - `ExtractedTargets`:
+    - `routes`: full and stripped static route paths (e.g. `/api/v1/members`, `/users`).
+    - `properties`: leaf property names (e.g. `university`, `email`).
+    - `routeSegments`: non-trivial route segments or model names (e.g. `members`).
+
+- Core Engine Functions:
+  - `extractEndpointTargets(changes: BreakingChange[])`:
+    - Parses HTTP method + path patterns (e.g. `GET /api/v1/members`).
+    - Strips parameterized segments (`/users/{id}` -> `/users`).
+    - Extracts leaf properties (`components.schemas.User.email` -> `email`).
+  - `filterCandidateFiles(files: SourceFileContent[], changes: BreakingChange[], options?)`:
+    - Compiles word-boundary regexes for leaf properties (`\bemail\b`) and route patterns.
+    - Scans file contents in linear time using regex matching.
+    - Partitions files into `candidateFiles` and `skippedFiles`.
+  - `filterCandidateFilesFromProject(project: Project, changes: BreakingChange[], options?)`:
+    - Integrates directly with `ts-morph` `Project`.
+    - Honors Sentinel ignore configurations (`shouldIgnoreFile`).
+    - Feeds filtered candidate `SourceFile` instances to subsequent AST analyzers.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/analyzer/filter.test.ts` (4 passing tests):
+  1. Route and property extraction from diverse BreakingChange paths.
+  2. Candidate file filtering with word-boundary isolation.
+  3. Correct behavior when no breaking changes are provided (no-op pass-through).
+  4. Integration with ts-morph `Project` honoring ignore lists and calculating stats.
+- Entire test suite: 67 passing unit tests across 11 test files.
+================================================================================
