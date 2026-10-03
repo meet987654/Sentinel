@@ -1,4 +1,6 @@
 import { BreakingChange } from '../types.js';
+import { Project } from 'ts-morph';
+import { shouldIgnoreFile } from '../config.js';
 
 export interface EndpointFilterOptions {
   includeExactMatchesOnly?: boolean;
@@ -85,3 +87,120 @@ export function extractEndpointTargets(changes: BreakingChange[]): ExtractedTarg
     routeSegments: Array.from(segmentsSet),
   };
 }
+
+/**
+ * Fast-filters a collection of source files using lightweight regex and string matching
+ * to isolate candidate files referencing target routes, schema models, or properties.
+ */
+export function filterCandidateFiles(
+  files: SourceFileContent[],
+  changes: BreakingChange[],
+  options?: EndpointFilterOptions
+): FilterCandidateResult {
+  const targets = extractEndpointTargets(changes);
+  const candidateFiles: string[] = [];
+  const skippedFiles: string[] = [];
+
+  // Build regex patterns
+  const patterns: RegExp[] = [];
+
+  // 1. Target routes (e.g. "/api/v1/members")
+  for (const route of targets.routes) {
+    const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    patterns.push(new RegExp(escaped, 'i'));
+  }
+
+  // 2. Target properties with word boundaries (e.g. \buniversity\b)
+  for (const prop of targets.properties) {
+    const escaped = prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    patterns.push(new RegExp(`\\b${escaped}\\b`, 'i'));
+  }
+
+  // 3. Meaningful route segments or models (e.g. \bmembers\b or \bMemberResponse\b)
+  if (!options?.includeExactMatchesOnly) {
+    for (const seg of targets.routeSegments) {
+      const escaped = seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      patterns.push(new RegExp(`\\b${escaped}\\b`, 'i'));
+    }
+  }
+
+  if (options?.additionalKeywords) {
+    for (const kw of options.additionalKeywords) {
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      patterns.push(new RegExp(`\\b${escaped}\\b`, 'i'));
+    }
+  }
+
+  for (const file of files) {
+    // If no patterns to search for, keep all files by default
+    if (patterns.length === 0) {
+      candidateFiles.push(file.filePath);
+      continue;
+    }
+
+    let isCandidate = false;
+    for (const pattern of patterns) {
+      if (pattern.test(file.content)) {
+        isCandidate = true;
+        break;
+      }
+    }
+
+    if (isCandidate) {
+      candidateFiles.push(file.filePath);
+    } else {
+      skippedFiles.push(file.filePath);
+    }
+  }
+
+  const totalFiles = files.length;
+  const candidateCount = candidateFiles.length;
+  const filteredOutCount = skippedFiles.length;
+  const filterRatio = totalFiles > 0 ? Math.round((filteredOutCount / totalFiles) * 1000) / 1000 : 0;
+
+  return {
+    candidateFiles,
+    skippedFiles,
+    targetRoutes: targets.routes,
+    targetProperties: targets.properties,
+    stats: {
+      totalFiles,
+      candidateCount,
+      filteredOutCount,
+      filterRatio,
+    }
+  };
+}
+
+/**
+ * Filters source files from an in-memory ts-morph Project prior to heavy AST property scanning.
+ */
+export function filterCandidateFilesFromProject(
+  project: Project,
+  changes: BreakingChange[],
+  options?: EndpointFilterOptions & { ignorePaths?: string[] }
+): FilterCandidateResult {
+  const files: SourceFileContent[] = [];
+  const ignorePaths = options?.ignorePaths || [];
+
+  for (const sourceFile of project.getSourceFiles()) {
+    const rawPath = sourceFile.getFilePath();
+    const relativePath = rawPath.replace(/\\/g, '/').replace(/^\//, '');
+
+    if (
+      relativePath.includes('node_modules') ||
+      relativePath.includes('dist') ||
+      shouldIgnoreFile(relativePath, ignorePaths)
+    ) {
+      continue;
+    }
+
+    files.push({
+      filePath: relativePath,
+      content: sourceFile.getFullText(),
+    });
+  }
+
+  return filterCandidateFiles(files, changes, options);
+}
+
