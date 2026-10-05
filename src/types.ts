@@ -28,12 +28,25 @@ export interface SchemaNode {
   allOf?: SchemaNode[];
 }
 
+export type BreakingChangeType =
+  | 'ENDPOINT_REMOVED'
+  | 'FIELD_REMOVED'
+  | 'TYPE_CHANGED'
+  | 'OPTIONAL_TO_REQUIRED'
+  | 'VARIANT_REMOVED'
+  | 'NULLABLE_REMOVED'
+  | 'GRAPHQL_FIELD_REMOVED'
+  | 'GRAPHQL_TYPE_CHANGED'
+  | 'GRAPHQL_ARG_REQUIRED'
+  | 'GRAPHQL_TYPE_REMOVED';
+
 export interface BreakingChange {
-  type: 'ENDPOINT_REMOVED' | 'FIELD_REMOVED' | 'TYPE_CHANGED' | 'OPTIONAL_TO_REQUIRED' | 'VARIANT_REMOVED' | 'NULLABLE_REMOVED';
+  type: BreakingChangeType;
   severity: 'breaking' | 'warning' | 'safe';
-  path: string; // e.g. "/users/{id}.GET.response.email"
+  path: string; // e.g. "/users/{id}.GET.response.email" or "Query.user.email"
   oldValue?: unknown;
   newValue?: unknown;
+  protocol?: 'openapi' | 'graphql' | 'grpc' | 'asyncapi';
 }
 
 export interface ConsumerFinding {

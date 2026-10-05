@@ -1,0 +1,66 @@
+================================================================================
+ISSUE #16 (PHASE 5 ISSUE #1): GRAPHQL SCHEMA BREAKING CHANGE PARSER & AST TRACER
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+While OpenAPI dominates REST APIs, modern enterprise architectures increasingly
+rely on GraphQL schemas (`schema.graphql`) for client-facing and federated graphs.
+A field removal or type change in a GraphQL schema can break web, mobile, and
+backend consumer queries without triggering traditional REST contract checkers.
+
+Sentinel Phase 5 extends contract impact detection to multi-protocol architectures,
+starting with full support for GraphQL Schema Definition Language (SDL) schemas,
+automated breaking change diffing, and AST-level query tracing across consumer code.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/schema/graphqlDiffer.ts`
+- Core Data Models & Protocol Discriminators:
+  - Extended `BreakingChange` with `protocol: 'graphql'` and new change types:
+    - `GRAPHQL_FIELD_REMOVED`
+    - `GRAPHQL_TYPE_CHANGED`
+    - `GRAPHQL_ARG_REQUIRED`
+    - `GRAPHQL_TYPE_REMOVED`
+  - `GraphQLBreakingChange`: includes `typeName`, `fieldName`, and `argName`.
+  - `GraphQLDiffOptions`: supports `includeWarnings` to capture dangerous changes.
+  - `GraphQLSourceDocument`: encapsulates consumer file paths and source content.
+
+- Diffing Engine (`diffGraphQLSchemas`):
+  - Uses `graphql`'s `buildSchema` and `findBreakingChanges` / `findDangerousChanges`.
+  - Normalizes raw GraphQL change descriptions into structured Sentinel `BreakingChange` objects.
+  - Correctly captures:
+    - Field removals (`User.name was removed`)
+    - Field type modifications (`User.name changed type from String! to Int!`)
+    - Required input arguments added (`Query.user(organizationId:) was added`)
+    - Removed types and enum values (`DeprecatedType was removed`, `Role.MODERATOR was removed`)
+  - Safely handles empty or malformed SDL schemas without throwing uncaught exceptions.
+
+- Consumer Query AST Tracer (`traceGraphQLConsumerQueries`):
+  - Scans consumer documents across two primary formats:
+    1. Pure `.graphql` / `.gql` query documents:
+       - Parses entire document into GraphQL AST via `parse()`.
+       - Visits `Field` AST nodes to locate broken field selections.
+       - Maps `node.loc.start` character offset to exact 1-indexed line numbers.
+       - Falls back to robust line-by-line regex scanning if the document is a partial fragment.
+    2. JavaScript / TypeScript files (`.ts`, `.tsx`, `.js`, `.jsx`):
+       - Extracts `gql\`...\`` and `graphql\`...\`` tagged template literals.
+       - Parses inner GraphQL operations and calculates exact line numbers within the host file.
+       - Scans query/mutation string literals.
+  - Produces deduplicated `ConsumerFinding` objects with `confidence: 'confirmed'` or `'high'`.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/schema/graphqlDiffer.test.ts` (10 passing tests):
+  1. Object type field removals.
+  2. Field type alterations (e.g. String! to Int!).
+  3. Added required arguments on existing operations.
+  4. Removed types and enum values.
+  5. Empty and malformed SDL error handling.
+  6. Non-breaking dangerous changes via `includeWarnings`.
+  7. Pure `.graphql` document AST query field tracing with exact line numbers.
+  8. TypeScript `gql` tagged template literal tracing in `.tsx` files.
+  9. Graceful fallback on syntax error fragments.
+  10. Empty inputs and edge-case handling.
+- Whole test suite status: 77 passed unit tests across 12 test files with 0 failures.
+================================================================================
