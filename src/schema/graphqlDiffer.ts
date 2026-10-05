@@ -76,9 +76,9 @@ function parseGraphQLChange(
     changeType = 'GRAPHQL_ARG_REQUIRED';
   }
 
-  // 4. Type removed: "Type Admin was removed."
-  const typeRemovedMatch = desc.match(/^Type\s+([A-Za-z0-9_]+)\s+was removed/i);
-  if (typeRemovedMatch) {
+  // 4. Type removed: "Admin was removed." or "Type Admin was removed."
+  const typeRemovedMatch = desc.match(/^(?:Type\s+)?([A-Za-z0-9_]+)\s+was removed/i);
+  if (typeRemovedMatch && ('type' in change && change.type === 'TYPE_REMOVED' || !desc.includes('.'))) {
     typeName = typeRemovedMatch[1];
     path = typeName;
     changeType = 'GRAPHQL_TYPE_REMOVED';
