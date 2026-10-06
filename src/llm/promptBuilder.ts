@@ -24,22 +24,6 @@ export interface FormattedPromptPayload {
 }
 
 /**
- * Common regex patterns for identifying credentials, bearer tokens, and secrets in code snippets.
- */
-const SECRET_PATTERNS = [
-  // Bearer tokens & JWTs
-  /(bearer\s+)eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/gi,
-  // GitHub Personal Access Tokens (classic and fine-grained)
-  /\b(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\b/g,
-  // Generic / Stripe / OpenAI / AWS secret keys
-  /\b(sk_live_[0-9a-zA-Z]{24,}|sk-[a-zA-Z0-9]{32,}|AKIA[0-9A-Z]{16})\b/g,
-  // Key-value secret assignments: api_key = "...", token: '...', password: "..."
-  /((?:api_?key|secret|password|access_?token|auth_?token|private_?key)\s*[:=]\s*['"])([^'"]{6,})(['"])/gi,
-  // Private key block headers
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-];
-
-/**
  * Scans a code snippet or string, redacting API keys, passwords, and secrets.
  */
 export function sanitizeCodeSnippet(snippet: string): SanitizationResult {
@@ -48,22 +32,50 @@ export function sanitizeCodeSnippet(snippet: string): SanitizationResult {
   let sanitized = snippet;
   let redactedCount = 0;
 
-  for (const pattern of SECRET_PATTERNS) {
-    if (pattern.test(sanitized)) {
-      // Reset lastIndex for global regex
-      pattern.lastIndex = 0;
-      sanitized = sanitized.replace(pattern, (match, prefix, secretVal, suffix) => {
-        redactedCount++;
-        if (prefix && suffix && secretVal !== undefined) {
-          return `${prefix}[REDACTED_SECRET]${suffix}`;
-        }
-        if (match.toLowerCase().startsWith('bearer ')) {
-          return 'Bearer [REDACTED_JWT]';
-        }
-        return '[REDACTED_SECRET]';
-      });
+  // 1. Bearer tokens & JWTs
+  sanitized = sanitized.replace(
+    /(bearer\s+)eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/gi,
+    () => {
+      redactedCount++;
+      return 'Bearer [REDACTED_JWT]';
     }
-  }
+  );
+
+  // 2. GitHub Personal Access Tokens
+  sanitized = sanitized.replace(
+    /\b(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\b/g,
+    () => {
+      redactedCount++;
+      return '[REDACTED_SECRET]';
+    }
+  );
+
+  // 3. Generic / Stripe / OpenAI / AWS secret keys
+  sanitized = sanitized.replace(
+    /\b(sk_live_[0-9a-zA-Z]{24,}|sk-[a-zA-Z0-9]{32,}|AKIA[0-9A-Z]{16})\b/g,
+    () => {
+      redactedCount++;
+      return '[REDACTED_SECRET]';
+    }
+  );
+
+  // 4. Key-value secret assignments: api_key = "...", token: '...', password: "..."
+  sanitized = sanitized.replace(
+    /((?:api_?key|secret|password|access_?token|auth_?token|private_?key)\s*[:=]\s*['"])([^'"]{6,})(['"])/gi,
+    (_match, prefix, _secretVal, suffix) => {
+      redactedCount++;
+      return `${prefix}[REDACTED_SECRET]${suffix}`;
+    }
+  );
+
+  // 5. Private key block headers
+  sanitized = sanitized.replace(
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+    () => {
+      redactedCount++;
+      return '[REDACTED_PRIVATE_KEY]';
+    }
+  );
 
   return { sanitized, redactedCount };
 }
