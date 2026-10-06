@@ -25,6 +25,7 @@
     "js-yaml": "^4.1.0",
     "octokit": "^3.2.1",
     "openapi-types": "^12.1.3",
+    "protobufjs": "^8.8.0",
     "ts-morph": "^21.0.1"
   },
   "devDependencies": {
