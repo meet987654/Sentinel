@@ -1,0 +1,58 @@
+================================================================================
+ISSUE #20 (PHASE 6 ISSUE #2): LLM-ASSISTED CODE MIGRATION SUGGESTION GENERATOR
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+While deterministic AST analysis pinpoints exact line numbers and broken field
+accesses, developers still face the friction of deciphering how to rewrite their
+code to conform to new API contracts.
+
+Sentinel Issue #20 implements the LLM-Assisted Code Migration Suggestion Generator.
+It translates raw deterministic AST findings into actionable developer migration
+guides rendered directly inside Pull Request comments and Check Run summaries.
+
+Crucially, Sentinel employs a strict "Graceful Degradation" philosophy:
+If LLM API keys are unconfigured, or if external AI model endpoints experience
+outages/rate-limiting, Sentinel falls back cleanly to deterministic migration
+heuristics without crashing CI pipelines or blocking PR checks.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/llm/summarizer.ts`
+- Core Data Models:
+  - `MigrationStep`:
+    - `filePath`, `lineNumber`, `property`: exact AST finding metadata.
+    - `instruction`: clear explanation of the required change.
+    - `beforeSnippet`: original source code line.
+    - `afterSnippet?: string`: recommended migrated code diff.
+  - `MigrationGuideResult`:
+    - `executiveSummary`: high-level impact summary.
+    - `migrationSteps`: array of `MigrationStep`.
+    - `markdown`: rendered GitHub-flavored Markdown block.
+    - `isAiGenerated: boolean`: telemetry indicator.
+    - `provider`: `'groq' | 'gemini' | 'openai' | 'fallback'`.
+
+- Migration Engine (`generateMigrationGuide`):
+  - Ingests `BreakingChange[]` and `ConsumerFinding[]`.
+  - Invokes `buildImpactPrompt()` to create sanitized, budgeted prompt payloads.
+  - Interfaces with Groq / Llama-3 (`llama-3.3-70b-versatile`).
+  - Implements strict timeout race protection (`timeoutMs: 8000`).
+  - Fallback Engine:
+    - Automatically activates on missing API keys, network errors, or timeouts.
+    - Produces structured migration steps using deterministic AST property analysis.
+
+- Markdown Renderer (`formatMigrationMarkdown`):
+  - Formats output into a collapsible `<details open><summary>` block.
+  - Renders Before and After code diffs for easy copy-pasting.
+  - Provides backwards-compatible `generateSummary()` export for GitHub App reporter.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/llm/summarizer.test.ts` (5 passing tests):
+  1. AI-powered migration guide generation via mock LLM client.
+  2. Graceful deterministic fallback when API keys are absent.
+  3. Graceful handling of network timeouts / API exceptions (429 Rate Limit).
+  4. GitHub-flavored Markdown formatting with collapsible details.
+  5. Backwards-compatible `generateSummary` function integration.
+================================================================================
