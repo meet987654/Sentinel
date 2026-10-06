@@ -6,17 +6,23 @@ import path from 'path';
 describe('Standalone CLI Runner Mode (runCli)', () => {
   const tmpDir = path.resolve(process.cwd(), 'scratch/cli-test-temp');
 
-  beforeEach(() => {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+  const cleanTmpDir = () => {
+    try {
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      }
+    } catch {
+      // Ignore Windows transient lock
     }
+  };
+
+  beforeEach(() => {
+    cleanTmpDir();
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 
   afterEach(() => {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+    cleanTmpDir();
   });
 
   it('should return exit code 1 when schema file is missing', async () => {
