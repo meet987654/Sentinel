@@ -1,0 +1,68 @@
+================================================================================
+ISSUE #17 (PHASE 5 ISSUE #2): GRPC PROTOBUF CONTRACT COMPATIBILITY CHECKER
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+In high-throughput microservice architectures using gRPC, Protocol Buffers (.proto)
+define service contracts and binary wire serialization formats. Unlike JSON or
+REST APIs where field names dominate, Protobuf wire serialization is strictly
+bound to integer field tag numbers, wire types, and cardinality rules.
+
+A change in a .proto file that modifies a field tag number, alters a scalar type,
+deletes a field, or converts a singular field into a repeated field silently breaks
+binary serialization or crashes downstream client applications.
+
+Sentinel Issue #17 introduces a dedicated gRPC Protobuf Contract Compatibility
+Checker that diffs .proto schemas and traces breaking changes into consumer code.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/schema/protoDiffer.ts`
+- Core Data Models & Protocol Discriminators:
+  - Extended `BreakingChange` with `protocol: 'grpc'` and protobuf change types:
+    - `PROTO_FIELD_REMOVED`
+    - `PROTO_FIELD_TAG_CHANGED`
+    - `PROTO_FIELD_TYPE_CHANGED`
+    - `PROTO_FIELD_RULE_CHANGED`
+    - `PROTO_MESSAGE_REMOVED`
+    - `PROTO_METHOD_REMOVED`
+    - `PROTO_ENUM_VALUE_REMOVED`
+  - `ProtoBreakingChange`: includes `messageName`, `serviceName`, `fieldName`,
+    `methodName`, and `tagNumber`.
+  - `ProtoSourceDocument`: encapsulates consumer file paths and source content.
+
+- Protobuf Diffing Engine (`diffProtoSchemas`):
+  - Uses `protobufjs` to parse proto2 and proto3 specifications into AST roots.
+  - Recursively flattens messages, services, and enums into namespace maps.
+  - Computes breaking changes across:
+    - Field removals (`PROTO_FIELD_REMOVED`)
+    - Tag number changes (`PROTO_FIELD_TAG_CHANGED`): flags changes that break
+      binary wire encoding even if field names are identical.
+    - Type changes (`PROTO_FIELD_TYPE_CHANGED`): flags changes that shift wire
+      formats (e.g. varint vs length-delimited).
+    - Rule changes (`PROTO_FIELD_RULE_CHANGED`): flags changes between singular
+      and `repeated` fields.
+    - Message, service method, and enum value removals.
+  - Safely handles malformed syntax without throwing unhandled exceptions.
+
+- Consumer Code Tracer (`traceProtoConsumerCode`):
+  - Scans consumer TypeScript/JavaScript source code for:
+    - Direct property access (e.g. `user.university`).
+    - Protobuf getter/setter methods (e.g. `user.getUniversity()`).
+    - Service RPC client calls (e.g. `client.DeactivateUser(...)`).
+    - Destructured field assignments (e.g. `const { university } = user`).
+  - Emits deduplicated `ConsumerFinding` objects with exact 1-indexed line numbers
+    and code snippets.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/schema/protoDiffer.test.ts` (7 passing tests):
+  1. Removed fields in message definitions.
+  2. Wire-breaking field tag number alterations.
+  3. Field data type changes (string to int64).
+  4. Field rule changes (singular to repeated).
+  5. Removed messages, service methods, and enum values.
+  6. Empty or malformed proto handling.
+  7. Consumer property access, getter calls, and RPC method tracing.
+================================================================================
