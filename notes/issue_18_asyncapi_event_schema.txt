@@ -1,0 +1,63 @@
+================================================================================
+ISSUE #18 (PHASE 5 ISSUE #3): ASYNCAPI EVENT SCHEMA COMPATIBILITY ENGINE
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+Event-driven architectures using Apache Kafka, RabbitMQ, Amazon EventBridge, or
+WebSockets rely on asynchronous event contracts. AsyncAPI (2.x / 3.x) is the open
+standard for documenting message-driven event streams, channels, operations, and
+payload schemas.
+
+In event broker topologies, changing an event payload schema (such as dropping a
+property, changing property types, or adding required fields) creates silent
+failures across subscriber services that consume events asynchronously.
+
+Sentinel Issue #18 extends contract compatibility checking to AsyncAPI, enabling
+automated detection of breaking message payload modifications and tracing broken
+event properties into consumer handler code.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/schema/asyncapiDiffer.ts`
+- Core Data Models & Protocol Discriminators:
+  - Extended `BreakingChange` with `protocol: 'asyncapi'` and change types:
+    - `ASYNCAPI_CHANNEL_REMOVED`
+    - `ASYNCAPI_MESSAGE_REMOVED`
+    - `ASYNCAPI_FIELD_REMOVED`
+    - `ASYNCAPI_TYPE_CHANGED`
+    - `ASYNCAPI_REQUIRED_ADDED`
+  - `AsyncApiBreakingChange`: includes `channelName`, `messageName`, and `propertyName`.
+  - `AsyncApiSourceDocument`: encapsulates subscriber file paths and source content.
+
+- AsyncAPI Diffing Engine (`diffAsyncApiSchemas`):
+  - Parses YAML and JSON AsyncAPI specifications (supporting 2.x and 3.x).
+  - Resolves internal component pointers (`#/components/schemas/...`, `#/components/messages/...`).
+  - Normalizes channels, operations (`publish`/`subscribe`), and message payloads.
+  - Detects:
+    - Channel removals (`ASYNCAPI_CHANNEL_REMOVED`)
+    - Message definition removals (`ASYNCAPI_MESSAGE_REMOVED`)
+    - Payload field deletions (`ASYNCAPI_FIELD_REMOVED`)
+    - Property type shifts (`ASYNCAPI_TYPE_CHANGED`)
+    - Shifts from optional to required (`ASYNCAPI_REQUIRED_ADDED`)
+  - Safely handles malformed syntax without throwing unhandled exceptions.
+
+- Consumer Code Tracer (`traceAsyncApiConsumerCode`):
+  - Scans consumer TypeScript/JavaScript code for:
+    - Event payload property accesses (`event.property`, `payload.property`, `msg.property`).
+    - Destructured event arguments (`const { property } = event`).
+    - Channel and topic string references in event listeners.
+  - Emits deduplicated `ConsumerFinding` objects with exact 1-indexed line numbers
+    and code snippets.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/schema/asyncapiDiffer.test.ts` (7 passing tests):
+  1. Removed fields in message payloads.
+  2. Property type alterations in event messages.
+  3. Optional to required field shifts.
+  4. Removed channels and operations.
+  5. Recursive `$ref` resolution for component message and schema definitions.
+  6. Empty or malformed input error handling.
+  7. Consumer event handler property access and destructuring tracing.
+================================================================================
