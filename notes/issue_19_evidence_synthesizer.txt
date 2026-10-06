@@ -1,0 +1,59 @@
+================================================================================
+ISSUE #19 (PHASE 6 ISSUE #1): DETERMINISTIC EVIDENCE SYNTHESIZER & PROMPT FORMATTER
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+Sentinel's core design philosophy is:
+"Deterministic analysis establishes evidence. AI explains the evidence."
+
+Large Language Models (LLMs) are prone to hallucinations when asked to inspect
+codebases unguided. Rather than letting an AI agent guess where code breakages
+occur, Sentinel computes the mathematical source-of-truth via deterministic
+AST scanners (ts-morph, GraphQL AST, Protobuf, AsyncAPI).
+
+Issue #19 implements the Deterministic Evidence Synthesizer that transforms raw
+AST findings into clean, structured, and sanitized prompt payloads ready for
+downstream AI models (Google Gemini, OpenAI, Groq).
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/llm/promptBuilder.ts`
+- Core Data Models:
+  - `PromptBuilderOptions`:
+    - `maxCharacterBudget?: number`: controls payload token bounds (default: 16k chars).
+    - `targetLanguage?: string`: syntax highlighter hint for prompt snippets.
+    - `includeMetadataSummary?: boolean`.
+  - `FormattedPromptPayload`:
+    - `systemPrompt`: establishes the AI persona (Contract Migration Specialist).
+    - `userPrompt`: structured contract changes + affected source code snippets.
+    - `metadata`: telemetry metrics (`totalChanges`, `totalFindings`,
+      `redactedSecretsCount`, `estimatedTokens`, `isTruncated`).
+
+- Code Sanitizer (`sanitizeCodeSnippet`):
+  - Pre-screens code snippets prior to LLM submission to prevent credential leakage.
+  - Redacts:
+    - Bearer tokens & JSON Web Tokens (`Bearer [REDACTED_JWT]`).
+    - GitHub Personal Access Tokens (`ghp_...`, `github_pat_...`).
+    - Cloud & AI API keys (`sk_live_...`, `sk-...`, AWS `AKIA...`).
+    - Key-value assignments (`api_key: "..."`, `password: "..."`).
+    - PEM private key blocks.
+
+- Evidence Synthesizer (`buildImpactPrompt`):
+  - Ingests `BreakingChange[]` and `ConsumerFinding[]`.
+  - Formats breaking changes with protocol tags (`[OPENAPI]`, `[GRAPHQL]`, `[GRPC]`, `[ASYNCAPI]`).
+  - Groups downstream code usages by file path with line numbers and confidence levels.
+  - Enforces character/token budgets with graceful truncation markers.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/llm/promptBuilder.test.ts` (8 passing tests):
+  1. Bearer token and JWT redaction.
+  2. GitHub PAT, OpenAI, and Stripe secret key redaction.
+  3. Key-value secret and password assignment redaction.
+  4. Preservation of non-sensitive code without false positives.
+  5. Empty snippet handling.
+  6. Multi-protocol breaking changes and grouped findings synthesis.
+  7. Token budget enforcement and graceful truncation.
+  8. Empty input handling.
+================================================================================
