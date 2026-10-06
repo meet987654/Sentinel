@@ -1,0 +1,61 @@
+================================================================================
+ISSUE #21 (PHASE 6 ISSUE #3): AUTOMATED REMEDIATION PULL REQUEST GENERATOR
+================================================================================
+
+1. OVERVIEW & MOTIVATION
+--------------------------------------------------------------------------------
+The final frontier of proactive contract reliability is closing the feedback loop:
+moving from detecting and diagnosing breaking changes to automatically fixing
+them in downstream consumer codebases.
+
+Sentinel Issue #21 implements the Automated Remediation Pull Request Generator.
+When an API provider updates or deprecates a schema property, Sentinel can
+programmatically generate a fix branch, apply AST transformations using ts-morph,
+commit the migrated code, and open an automated Draft Pull Request directly in
+the consumer repository referencing the original provider PR.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Target Module: `src/remediation/prGenerator.ts`
+- Core Data Models:
+  - `PropertyRenameRule`:
+    - `targetProperty`: old/deprecated API field name (e.g. `university`).
+    - `replacementProperty`: new/migrated API field name (e.g. `college`).
+  - `TransformedFile`:
+    - `filePath`, `originalContent`, `transformedContent`, `replacementsCount`.
+  - `RemediationPROptions`:
+    - `octokit`: authenticated Octokit instance or mock.
+    - `repoOwner`, `repoName`: target consumer repository coordinates.
+    - `branchName`: dedicated fix branch (e.g. `sentinel/fix-university-to-college`).
+    - `providerPrNumber`, `providerPrUrl`: linkage to upstream API provider PR.
+    - `isDraft: boolean`: opens as Draft PR to prevent accidental merging.
+    - `dryRun: boolean`: enables simulation without live GitHub API writes.
+
+- AST Transformation Engine (`applyPropertyRename`, `transformConsumerFiles`):
+  - Uses `ts-morph` in-memory project to parse TypeScript/JavaScript source code.
+  - Transforms:
+    - `PropertyAccessExpression` nodes: `user.university` &rarr; `user.college`.
+    - `BindingElement` destructuring nodes: `const { university } = user` &rarr; `const { college } = user`.
+  - Preserves formatting, comments, and unrelated source code intact.
+
+- GitHub PR Generator (`createRemediationPR`):
+  - In dry-run mode: returns transformed files and simulated PR metadata.
+  - In live mode via Octokit:
+    1. Fetches default branch commit SHA (`octokit.rest.git.getRef`).
+    2. Creates remediation branch (`octokit.rest.git.createRef`).
+    3. Commits modified files to the fix branch (`octokit.rest.repos.createOrUpdateFileContents`).
+    4. Opens a Draft PR with structured summary markdown linking the provider PR (`octokit.rest.pulls.create`).
+  - Gracefully handles GitHub API errors (e.g. 403 Forbidden) without crashing.
+
+3. VERIFICATION & TEST COVERAGE
+--------------------------------------------------------------------------------
+- Unit tests in `tests/remediation/prGenerator.test.ts` (5 passing tests):
+  1. `applyPropertyRename` on PropertyAccessExpressions with AST preservation.
+  2. `applyPropertyRename` on object destructuring binding elements.
+  3. Safe no-op on non-matching source code.
+  4. `transformConsumerFiles` filtering and replacement counts.
+  5. `createRemediationPR` dry-run simulation mode.
+  6. `createRemediationPR` full Octokit branch creation and Draft PR generation.
+  7. Graceful error handling on Octokit API rejections.
+- Whole test suite status: 112 passing unit tests across 17 test files.
+================================================================================
